@@ -1,13 +1,15 @@
 import logging
 import argparse
 import uvicorn
-from apscheduler import Scheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.schedulers.background import BackgroundScheduler
 from trader.config import load_config
 from trader.adapters.coinbase import CoinbaseAdapter
 from trader.llm.sentiment import SentimentAnalyzer
 from trader.collectors.cryptopanic import CryptoPanicCollector
 from trader.collectors.reddit import RedditCollector
+from trader.collectors.rss import RSSCollector
+from trader.collectors.feargreed import FearGreedCollector
+from trader.collectors.coingecko import CoinGeckoCollector
 from trader.core.engine import TradingEngine
 from trader.dashboard.api import create_app
 
@@ -35,18 +37,26 @@ def main():
         CryptoPanicCollector(api_key=cfg.cryptopanic.api_key),
         RedditCollector(client_id=cfg.reddit.client_id, client_secret=cfg.reddit.client_secret,
                         user_agent=cfg.reddit.user_agent),
+        RSSCollector(),  # CoinDesk, CoinTelegraph, Decrypt — no key needed
+    ]
+
+    numeric_collectors = [
+        FearGreedCollector(),    # Crypto Fear & Greed Index
+        CoinGeckoCollector(),    # Global market cap change
     ]
 
     engine = TradingEngine(config=cfg, adapter=adapter, sentiment_analyzer=sentiment,
-                           collectors=collectors, db_path=args.db)
+                           collectors=collectors, numeric_collectors=numeric_collectors,
+                           db_path=args.db)
 
-    scheduler = Scheduler()
-    scheduler.add_schedule(
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
         engine.run_cycle,
-        IntervalTrigger(seconds=cfg.cycle_interval),
+        "interval",
+        seconds=cfg.cycle_interval,
         id="trading_cycle",
     )
-    scheduler.start_in_background()
+    scheduler.start()
     logger.info(f"Scheduler started, cycle every {cfg.cycle_interval}s")
 
     app = create_app(engine)
