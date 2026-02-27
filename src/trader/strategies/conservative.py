@@ -14,7 +14,7 @@ class ConservativeStrategy(Strategy):
         combined = technical.score * TECH_WEIGHT + sentiment.score * SENTIMENT_WEIGHT
 
         if combined >= BUY_THRESHOLD and position == 0.0:
-            return {"action": "buy", "usd_amount": capital * MAX_POSITION_PCT,
+            return {"action": "buy", "usd_amount": min(capital * self.risk.max_position_pct, capital * 0.10),
                     "reason": f"conservative buy at {combined:.2f}"}
 
         if combined <= SELL_THRESHOLD and position > 0.0:

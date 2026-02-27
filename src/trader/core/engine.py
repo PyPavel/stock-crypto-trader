@@ -69,6 +69,18 @@ class TradingEngine:
             pos = self.portfolio.positions[symbol]
             position_usd = pos["amount"] * price
 
+        # Independent stop-loss check — fires before strategy decision
+        if position_usd > 0 and symbol in self.portfolio.positions:
+            entry = self.portfolio.positions[symbol]["entry_price"]
+            if self._risk.check_stop_loss(symbol, entry, price):
+                logger.warning(f"Stop-loss triggered for {symbol}: entry={entry:.2f}, current={price:.2f}")
+                order = self._router.execute("sell", symbol, position_usd, price=price)
+                trade = Trade(order_id=order.id, symbol=symbol, side="sell",
+                              amount=order.amount, price=order.price, fee=0.0,
+                              mode=self.config.mode, narrative="stop-loss triggered")
+                self.portfolio.record_trade(trade)
+                return  # exit after stop-loss, don't run strategy
+
         decision = self._strategy.decide(
             symbol=symbol,
             technical=tech_signal,
@@ -90,7 +102,7 @@ class TradingEngine:
                 logger.info(f"Buy blocked by risk manager: {risk_check['reason']}")
                 return
 
-            order = self._router.execute("buy", symbol, decision["usd_amount"])
+            order = self._router.execute("buy", symbol, decision["usd_amount"], price=price)
             trade = Trade(order_id=order.id, symbol=symbol, side="buy",
                           amount=order.amount, price=order.price, fee=0.0,
                           mode=self.config.mode, narrative=decision["reason"])
@@ -98,13 +110,7 @@ class TradingEngine:
             logger.info(f"BUY {symbol}: {order.amount:.6f} @ {order.price:.2f}")
 
         elif decision["action"] == "sell" and position_usd > 0:
-            # Stop-loss check
-            if symbol in self.portfolio.positions:
-                entry = self.portfolio.positions[symbol]["entry_price"]
-                if self._risk.check_stop_loss(symbol, entry, price):
-                    logger.info(f"Stop-loss triggered for {symbol}")
-
-            order = self._router.execute("sell", symbol, position_usd)
+            order = self._router.execute("sell", symbol, position_usd, price=price)
             trade = Trade(order_id=order.id, symbol=symbol, side="sell",
                           amount=order.amount, price=order.price, fee=0.0,
                           mode=self.config.mode, narrative=decision["reason"])

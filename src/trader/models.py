@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 import uuid
 
@@ -20,7 +20,7 @@ class Signal:
     symbol: str
     score: float        # -1.0 (strong sell) to +1.0 (strong buy)
     reason: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -29,7 +29,7 @@ class SentimentScore:
     score: float        # -1.0 to +1.0
     source: str         # "reddit" | "cryptopanic" | "combined"
     items_analyzed: int
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -40,7 +40,7 @@ class Order:
     price: float
     mode: Literal["paper", "live"]
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "pending"
 
 
@@ -53,6 +53,6 @@ class Trade:
     price: float
     fee: float
     mode: Literal["paper", "live"]
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     pnl: float = 0.0
     narrative: str = ""

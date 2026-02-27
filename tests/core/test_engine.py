@@ -55,3 +55,20 @@ def test_engine_handles_collector_failure(tmp_path):
     engine = make_engine(tmp_path)
     engine._collectors[0].fetch.side_effect = Exception("network error")
     engine.run_cycle()  # should not raise, sentiment falls back to 0
+
+
+def test_stop_loss_triggers_sell(tmp_path):
+    engine = make_engine(tmp_path)
+    # Manually put a position in the portfolio with high entry price
+    from trader.models import Trade
+    from datetime import datetime, timezone
+    buy_trade = Trade(order_id="sl-test", symbol="BTC/USD", side="buy",
+                      amount=0.001, price=50000.0, fee=0.0, mode="paper",
+                      timestamp=datetime.now(timezone.utc))
+    engine.portfolio.record_trade(buy_trade)
+    # Price is now 40500 (set in make_engine), entry was 50000 = 19% loss > 5% stop-loss
+    engine.run_cycle()
+    trades = engine.portfolio.get_trades()
+    sell_trades = [t for t in trades if t.side == "sell"]
+    assert len(sell_trades) >= 1
+    assert sell_trades[0].narrative == "stop-loss triggered"

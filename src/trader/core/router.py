@@ -7,8 +7,9 @@ class OrderRouter:
         self._adapter = adapter
         self._mode = mode  # "paper" | "live"
 
-    def execute(self, side: str, symbol: str, usd_amount: float) -> Order:
-        price = self._adapter.get_price(symbol)
+    def execute(self, side: str, symbol: str, usd_amount: float, price: float | None = None) -> Order:
+        if price is None:
+            price = self._adapter.get_price(symbol)
         amount = usd_amount / price
 
         if self._mode == "paper":
