@@ -1,3 +1,4 @@
+import inspect
 import logging
 from trader.config import Config
 from trader.adapters.base import ExchangeAdapter
@@ -19,12 +20,14 @@ class TradingEngine:
         adapter: ExchangeAdapter,
         sentiment_analyzer: SentimentAnalyzer,
         collectors: list,
+        numeric_collectors: list | None = None,
         db_path: str = "trader.db",
     ):
         self.config = config
         self._adapter = adapter
         self._sentiment = sentiment_analyzer
         self._collectors = collectors
+        self._numeric_collectors = numeric_collectors or []
         self._signals = SignalGenerator()
         self._risk = RiskManager(config.risk)
         self._router = OrderRouter(adapter=adapter, mode=config.mode)
@@ -56,6 +59,28 @@ class TradingEngine:
                 logger.warning(f"Collector failed: {e}")
 
         raw_sentiment = self._sentiment.score_texts(texts)
+
+        # Blend in numeric signals (Fear & Greed, CoinGecko, etc.)
+        numeric_scores = []
+        for nc in self._numeric_collectors:
+            try:
+                sig = inspect.signature(nc.score)
+                params = list(sig.parameters.keys())
+                s = nc.score(symbols=[symbol]) if "symbols" in params else nc.score()
+                if s is not None:
+                    numeric_scores.append(s)
+            except Exception as e:
+                logger.warning(f"Numeric collector failed: {e}")
+
+        if numeric_scores:
+            numeric_avg = sum(numeric_scores) / len(numeric_scores)
+            # Weight: 60% text sentiment, 40% numeric signals (or 100% numeric if no texts)
+            if texts:
+                raw_sentiment = raw_sentiment * 0.60 + numeric_avg * 0.40
+            else:
+                raw_sentiment = numeric_avg
+            logger.info(f"{symbol} numeric_signals={[f'{s:.3f}' for s in numeric_scores]} blended_sentiment={raw_sentiment:.3f}")
+
         sentiment = SentimentScore(symbol=symbol, score=raw_sentiment,
                                    source="combined", items_analyzed=len(texts))
 

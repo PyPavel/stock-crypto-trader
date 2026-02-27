@@ -57,6 +57,16 @@ def test_engine_handles_collector_failure(tmp_path):
     engine.run_cycle()  # should not raise, sentiment falls back to 0
 
 
+def test_numeric_collectors_blend_into_sentiment(tmp_path):
+    engine = make_engine(tmp_path)
+    # Add a numeric collector that returns strong buy signal
+    numeric_mock = MagicMock()
+    numeric_mock.score.return_value = 1.0
+    # Mock inspect to treat it as no-arg score
+    engine._numeric_collectors = [numeric_mock]
+    engine.run_cycle()  # should not raise
+
+
 def test_stop_loss_triggers_sell(tmp_path):
     engine = make_engine(tmp_path)
     # Manually put a position in the portfolio with high entry price
