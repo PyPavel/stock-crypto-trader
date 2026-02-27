@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trader Dashboard</title>
+  <style>
+    body { font-family: monospace; background: #0d1117; color: #e6edf3; padding: 20px; }
+    h1 { color: #58a6ff; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin: 12px 0; }
+    .green { color: #3fb950; } .red { color: #f85149; } .yellow { color: #d29922; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #30363d; }
+    button { background: #238636; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; margin: 4px; }
+    select { background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Trader Dashboard</h1>
+  <div class="card">
+    <h2>Status</h2>
+    <p>Mode: <strong id="mode">-</strong> &nbsp; Strategy: <strong id="strategy">-</strong></p>
+    <p>Cash: <strong id="cash">-</strong> &nbsp; Total Value: <strong id="total">-</strong></p>
+    <p>
+      <select id="mode-select" onchange="setMode(this.value)">
+        <option value="paper">Paper</option>
+        <option value="live">Live</option>
+      </select>
+      <select id="strategy-select" onchange="setStrategy(this.value)">
+        <option value="conservative">Conservative</option>
+        <option value="moderate">Moderate</option>
+        <option value="aggressive">Aggressive</option>
+      </select>
+      <button onclick="triggerCycle()">Run Cycle Now</button>
+    </p>
+  </div>
+  <div class="card">
+    <h2>Trades</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Amount</th><th>Price</th><th>Mode</th><th>Narrative</th></tr></thead>
+      <tbody id="trades-body"></tbody>
+    </table>
+  </div>
+  <script>
+    async function loadStatus() {
+      const r = await fetch('/api/status');
+      const d = await r.json();
+      document.getElementById('mode').textContent = d.mode;
+      document.getElementById('strategy').textContent = d.strategy;
+      document.getElementById('cash').textContent = '$' + d.cash.toFixed(2);
+      document.getElementById('total').textContent = '$' + d.total_value.toFixed(2);
+      document.getElementById('mode-select').value = d.mode;
+      document.getElementById('strategy-select').value = d.strategy;
+    }
+    async function loadTrades() {
+      const r = await fetch('/api/trades');
+      const trades = await r.json();
+      document.getElementById('trades-body').innerHTML = trades.slice(-50).reverse().map(t =>
+        `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.symbol}</td>
+         <td class="${t.side==='buy'?'green':'red'}">${t.side.toUpperCase()}</td>
+         <td>${t.amount.toFixed(6)}</td><td>$${t.price.toFixed(2)}</td>
+         <td class="yellow">${t.mode}</td><td>${t.narrative}</td></tr>`).join('');
+    }
+    async function setMode(mode) {
+      await fetch('/api/mode', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});
+      loadStatus();
+    }
+    async function setStrategy(strategy) {
+      await fetch('/api/strategy', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({strategy})});
+      loadStatus();
+    }
+    async function triggerCycle() {
+      await fetch('/api/cycle', {method:'POST'});
+      loadStatus(); loadTrades();
+    }
+    loadStatus(); loadTrades();
+    setInterval(() => { loadStatus(); loadTrades(); }, 30000);
+  </script>
+</body>
+</html>
