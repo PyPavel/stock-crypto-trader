@@ -4,6 +4,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 CRYPTOPANIC_URL = "https://cryptopanic.com/api/v1/posts/"
+CRYPTOPANIC_URL_FREE = "https://cryptopanic.com/api/free/v1/posts/"
 
 
 class CryptoPanicCollector:
@@ -12,12 +13,15 @@ class CryptoPanicCollector:
 
     def fetch(self, symbols: list[str], limit: int = 20) -> list[str]:
         currencies = {s.split("/")[0] for s in symbols}
-        params = {"public": "true", "kind": "news", "filter": "hot"}
+        params = {"public": "true", "kind": "news"}
         if self._api_key:
             params["auth_token"] = self._api_key
+            url = CRYPTOPANIC_URL
+        else:
+            url = CRYPTOPANIC_URL_FREE
 
         try:
-            response = requests.get(CRYPTOPANIC_URL, params=params, timeout=10)
+            response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
         except Exception as e:

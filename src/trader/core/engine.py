@@ -62,6 +62,7 @@ class TradingEngine:
         # 3. Technical signals
         tech_score = self._signals.score(candles)
         tech_signal = Signal(symbol=symbol, score=tech_score, reason="technical indicators")
+        logger.info(f"{symbol} price={price:.2f} tech={tech_score:.3f} sentiment={raw_sentiment:.3f} texts={len(texts)}")
 
         # 4. Strategy decision
         position_usd = 0.0
@@ -118,4 +119,4 @@ class TradingEngine:
             logger.info(f"SELL {symbol}: {order.amount:.6f} @ {order.price:.2f}")
 
         else:
-            logger.debug(f"HOLD {symbol}: {decision['reason']}")
+            logger.info(f"HOLD {symbol}: {decision['reason']}")
