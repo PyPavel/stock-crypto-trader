@@ -26,6 +26,7 @@ class TradingEngine:
         numeric_collectors: list | None = None,
         db_path: str = "trader.db",
         notifier=None,
+        universe=None,
     ):
         self.config = config
         self._adapter = adapter
@@ -33,6 +34,7 @@ class TradingEngine:
         self._collectors = collectors
         self._numeric_collectors = numeric_collectors or []
         self._notifier: TelegramNotifier | None = notifier
+        self._universe = universe  # SymbolUniverse | None
         self._signals = SignalGenerator()
         self._risk = RiskManager(config.risk)
         self._router = OrderRouter(adapter=adapter, mode=config.mode)
@@ -58,13 +60,41 @@ class TradingEngine:
             logger.info("Market is closed — skipping cycle")
             return
 
-        prices = {}
+        # Determine candidate symbols
+        if self._universe is not None and self.config.universe.enabled:
+            candidates = self._universe.get_candidates()
+        else:
+            candidates = self.config.pairs
 
-        for symbol in self.config.pairs:
+        # Always include symbols with open positions so stop-loss/sell fires regardless
+        open_symbols = list(self.portfolio.positions.keys())
+        all_symbols = list(dict.fromkeys(open_symbols + list(candidates)))
+
+        prices: dict[str, float] = {}
+
+        # Stage 1: score every symbol
+        scored: list[tuple[str, dict]] = []
+        for symbol in all_symbols:
+            result = self._score_symbol(symbol, prices)
+            if result is not None:
+                scored.append((symbol, result))
+
+        # Stage 2: determine buy-eligible set — top active_pairs from candidates by signal
+        n_active = self.config.universe.active_pairs if self.config.universe.enabled else len(self.config.pairs)
+        candidate_set = set(candidates)
+        candidate_scored = sorted(
+            [(s, r) for s, r in scored if s in candidate_set],
+            key=lambda x: abs(x[1]["combined_score"]),
+            reverse=True,
+        )
+        buy_eligible: set[str] = {s for s, _ in candidate_scored[:n_active]}
+
+        # Stage 3: execute decisions
+        for symbol, result in scored:
             try:
-                self._process_symbol(symbol, prices)
+                self._execute_decisions(symbol, result, prices, can_buy=(symbol in buy_eligible))
             except Exception as e:
-                logger.exception("Error processing %s: %s", symbol, e)
+                logger.exception("Error executing decisions for %s: %s", symbol, e)
 
     def _in_cooldown(self, symbol: str) -> bool:
         """Returns True if the symbol is still within its post-trade cooldown period."""
@@ -90,85 +120,123 @@ class TradingEngine:
         )
         self._notifier.send(msg)
 
-    def _process_symbol(self, symbol: str, prices: dict) -> None:
-        # 1. Market data
-        candles = self._adapter.get_candles(symbol, "1h", limit=100)
-        price = self._adapter.get_price(symbol)
-        prices[symbol] = price
+    def _score_symbol(self, symbol: str, prices: dict) -> dict | None:
+        """
+        Collect market data and compute all signals for `symbol`.
 
-        # 2. Sentiment — collect, deduplicate, score
-        texts = []
-        for collector in self._collectors:
-            try:
-                texts.extend(collector.fetch(symbols=[symbol]))
-            except Exception as e:
-                logger.warning("Collector failed: %s", e)
-        # Deduplicate at engine level too (collector-level dedup is in SentimentAnalyzer)
-        texts = list(dict.fromkeys(texts))  # preserves order, removes exact duplicates
+        Returns a dict with scoring results, or None on unrecoverable error.
+        No trades are placed here — side-effect-free.
+        """
+        try:
+            # 1. Market data
+            candles = self._adapter.get_candles(symbol, "1h", limit=100)
+            price = self._adapter.get_price(symbol)
+            prices[symbol] = price
 
-        raw_sentiment = self._sentiment.score_texts(texts)
+            # 2. Sentiment — collect, deduplicate, score
+            texts: list[str] = []
+            for collector in self._collectors:
+                try:
+                    texts.extend(collector.fetch(symbols=[symbol]))
+                except Exception as e:
+                    logger.warning("Collector failed: %s", e)
+            texts = list(dict.fromkeys(texts))
 
-        # Blend in numeric signals (Fear & Greed, CoinGecko, etc.)
-        numeric_scores = []
-        for nc in self._numeric_collectors:
-            try:
-                sig = inspect.signature(nc.score)
-                params = list(sig.parameters.keys())
-                s = nc.score(symbols=[symbol]) if "symbols" in params else nc.score()
-                if s is not None:
-                    numeric_scores.append(s)
-            except Exception as e:
-                logger.warning("Numeric collector failed: %s", e)
+            raw_sentiment = self._sentiment.score_texts(texts)
 
-        if numeric_scores:
-            numeric_avg = sum(numeric_scores) / len(numeric_scores)
-            # Weight: 60% text sentiment, 40% numeric signals (or 100% numeric if no texts)
-            if texts:
-                raw_sentiment = raw_sentiment * 0.60 + numeric_avg * 0.40
-            else:
-                raw_sentiment = numeric_avg
-            logger.info(
-                "%s numeric_signals=%s blended_sentiment=%.3f",
-                symbol, [f"{s:.3f}" for s in numeric_scores], raw_sentiment,
+            # Blend in numeric signals (Fear & Greed, CoinGecko, etc.)
+            numeric_scores = []
+            for nc in self._numeric_collectors:
+                try:
+                    sig = inspect.signature(nc.score)
+                    params = list(sig.parameters.keys())
+                    s = nc.score(symbols=[symbol]) if "symbols" in params else nc.score()
+                    if s is not None:
+                        numeric_scores.append(s)
+                except Exception as e:
+                    logger.warning("Numeric collector failed: %s", e)
+
+            if numeric_scores:
+                numeric_avg = sum(numeric_scores) / len(numeric_scores)
+                if texts:
+                    raw_sentiment = raw_sentiment * 0.60 + numeric_avg * 0.40
+                else:
+                    raw_sentiment = numeric_avg
+                logger.info(
+                    "%s numeric_signals=%s blended_sentiment=%.3f",
+                    symbol, [f"{s:.3f}" for s in numeric_scores], raw_sentiment,
+                )
+
+            sentiment = SentimentScore(symbol=symbol, score=raw_sentiment,
+                                       source="combined", items_analyzed=len(texts))
+
+            # 3. Technical signals
+            sig_result = self._signals.score_with_trend(candles)
+            tech_score = sig_result["score"]
+            trend_bullish = sig_result["trend_bullish"]
+            tech_signal = Signal(
+                symbol=symbol,
+                score=tech_score,
+                reason="technical indicators",
+                trend_bullish=trend_bullish,
             )
 
-        sentiment = SentimentScore(symbol=symbol, score=raw_sentiment,
-                                   source="combined", items_analyzed=len(texts))
+            # 3b. ML score override
+            ml_score = None
+            if self._ml is not None:
+                ml_score = self._ml.score(candles)
+                if ml_score is not None:
+                    tech_signal = Signal(score=ml_score, trend_bullish=tech_signal.trend_bullish)
 
-        # 3. Technical signals (includes trend + volume)
-        sig_result = self._signals.score_with_trend(candles)
-        tech_score = sig_result["score"]
-        trend_bullish = sig_result["trend_bullish"]
-        tech_signal = Signal(
-            symbol=symbol,
-            score=tech_score,
-            reason="technical indicators",
-            trend_bullish=trend_bullish,
-        )
-        # 3b. ML score override — replaces tech score when model is loaded
-        ml_score = None
-        if self._ml is not None:
-            ml_score = self._ml.score(candles)
+            # 3c. ATR
+            current_atr = self._signals.atr(candles, self.config.risk.atr_period)
+
+            # Combined score used for ranking candidates
+            active_score = ml_score if ml_score is not None else tech_score
+            combined_score = active_score * 0.6 + raw_sentiment * 0.4
+
             if ml_score is not None:
-                tech_signal = Signal(score=ml_score, trend_bullish=tech_signal.trend_bullish)
+                logger.info(
+                    "%s price=%.2f tech=%.3f ml=%.3f(active) trend=%s sentiment=%.3f atr=%.2f texts=%d",
+                    symbol, price, tech_score, ml_score, "bull" if trend_bullish else "bear",
+                    raw_sentiment, current_atr or 0.0, len(texts),
+                )
+            else:
+                logger.info(
+                    "%s price=%.2f tech=%.3f trend=%s sentiment=%.3f atr=%.2f texts=%d",
+                    symbol, price, tech_score, "bull" if trend_bullish else "bear",
+                    raw_sentiment, current_atr or 0.0, len(texts),
+                )
 
-        # 3c. Compute ATR for volatility-adjusted sizing/stops
-        current_atr = self._signals.atr(candles, self.config.risk.atr_period)
+            return {
+                "price": price,
+                "candles": candles,
+                "tech_signal": tech_signal,
+                "sentiment": sentiment,
+                "tech_score": tech_score,
+                "ml_score": ml_score,
+                "trend_bullish": trend_bullish,
+                "raw_sentiment": raw_sentiment,
+                "combined_score": combined_score,
+                "atr": current_atr,
+                "texts": texts,
+            }
+        except Exception as e:
+            logger.exception("Error scoring %s: %s", symbol, e)
+            return None
 
-        if ml_score is not None:
-            logger.info(
-                "%s price=%.2f tech=%.3f ml=%.3f(active) trend=%s sentiment=%.3f atr=%.2f texts=%d",
-                symbol, price, tech_score, ml_score, "bull" if trend_bullish else "bear",
-                raw_sentiment, current_atr or 0.0, len(texts),
-            )
-        else:
-            logger.info(
-                "%s price=%.2f tech=%.3f trend=%s sentiment=%.3f atr=%.2f texts=%d",
-                symbol, price, tech_score, "bull" if trend_bullish else "bear",
-                raw_sentiment, current_atr or 0.0, len(texts),
-            )
+    def _execute_decisions(self, symbol: str, result: dict, prices: dict,
+                           can_buy: bool = True) -> None:
+        """
+        Run stop-loss checks, strategy, risk validation, and order execution
+        for `symbol` using the pre-computed `result` from `_score_symbol`.
+        """
+        price = result["price"]
+        tech_signal = result["tech_signal"]
+        sentiment = result["sentiment"]
+        current_atr = result["atr"]
 
-        # 4. Current position
+        # Re-read position from live portfolio (may have changed if another symbol was processed)
         position_usd = 0.0
         if symbol in self.portfolio.positions:
             pos = self.portfolio.positions[symbol]
@@ -179,14 +247,12 @@ class TradingEngine:
             prev_peak = self._peak_prices.get(symbol, price)
             self._peak_prices[symbol] = max(prev_peak, price)
         else:
-            # No open position — clear peak
             self._peak_prices.pop(symbol, None)
 
-        # 4b. Trailing stop check — fires before strategy, after regular stop-loss
+        # 4b. Stop-loss and take-profit checks — fire regardless of buy eligibility
         if position_usd > 0 and symbol in self.portfolio.positions:
             entry = self.portfolio.positions[symbol]["entry_price"]
 
-            # Regular stop-loss (ATR-adaptive if configured)
             if self._risk.check_stop_loss(symbol, entry, price, atr=current_atr):
                 logger.warning(
                     "Stop-loss triggered for %s: entry=%.2f, current=%.2f",
@@ -195,7 +261,6 @@ class TradingEngine:
                 self._execute_sell(symbol, position_usd, price, "stop-loss triggered", prices=prices)
                 return
 
-            # Trailing stop-loss (ATR-adaptive if configured)
             peak = self._peak_prices.get(symbol, price)
             if peak > entry and self._risk.check_trailing_stop(peak, price, atr=current_atr):
                 logger.warning(
@@ -205,7 +270,6 @@ class TradingEngine:
                 self._execute_sell(symbol, position_usd, price, "trailing-stop triggered", prices=prices)
                 return
 
-            # Per-trade loss limit
             if self._risk.check_trade_loss_limit(entry, price, self.portfolio.starting_capital):
                 logger.warning(
                     "Per-trade loss limit triggered for %s: entry=%.2f, current=%.2f",
@@ -214,7 +278,6 @@ class TradingEngine:
                 self._execute_sell(symbol, position_usd, price, "per-trade-loss-limit triggered", prices=prices)
                 return
 
-            # Take-profit check (full exit)
             if self._risk.check_take_profit(entry, price):
                 logger.warning(
                     "Take-profit triggered for %s: entry=%.2f, current=%.2f (+%.1f%%)",
@@ -223,7 +286,6 @@ class TradingEngine:
                 self._execute_sell(symbol, position_usd, price, "take-profit triggered", prices=prices)
                 return
 
-            # Partial take-profit check (sell a portion)
             if self._risk.check_partial_take_profit(entry, price):
                 partial_usd = self._risk.partial_sell_amount(position_usd)
                 if partial_usd > 0:
@@ -234,7 +296,7 @@ class TradingEngine:
                     self._execute_sell(symbol, partial_usd, price, "partial-take-profit triggered", prices=prices)
                     return
 
-        # 4c. Cooldown check — skip strategy if recently traded
+        # 4c. Cooldown check
         if self._in_cooldown(symbol):
             remaining = self.config.risk.cooldown_minutes - (
                 (datetime.now(timezone.utc) - self._last_trade_time[symbol]).total_seconds() / 60
@@ -251,9 +313,13 @@ class TradingEngine:
             position=position_usd,
         )
 
+        # Block new buys if symbol didn't rank in top active_pairs
+        if decision["action"] == "buy" and not can_buy:
+            logger.info("BUY skipped for %s: not in top active pairs this cycle", symbol)
+            return
+
         # 6. Risk check and execution
         if decision["action"] == "buy":
-            # Daily loss tracking
             current_total = self.portfolio.cash
             if self.portfolio.positions and prices:
                 for sym, pos in self.portfolio.positions.items():
@@ -271,11 +337,9 @@ class TradingEngine:
                 daily_pnl=daily_pnl,
             )
 
-            # Use risk-capped amount if requested amount was too high
             final_usd = decision["usd_amount"]
             if not risk_check["allowed"]:
                 if "exceeds max" in risk_check["reason"]:
-                    # Use ATR-based sizing if enabled, otherwise fixed percentage
                     max_allowed = self._risk.calc_position_size(
                         self.portfolio.cash, price, atr=current_atr,
                     )
@@ -293,13 +357,13 @@ class TradingEngine:
                 return
 
             order = self._router.execute("buy", symbol, final_usd, price=price)
-            fee = order.amount * order.price * 0.001  # 0.1% fee estimate
+            fee = order.amount * order.price * 0.001
             trade = Trade(order_id=order.id, symbol=symbol, side="buy",
                           amount=order.amount, price=order.price, fee=fee,
                           mode=self.config.mode, narrative=decision["reason"])
             self.portfolio.record_trade(trade)
             self._record_trade_time(symbol)
-            self._peak_prices[symbol] = order.price  # initialise peak at entry
+            self._peak_prices[symbol] = order.price
             logger.info("BUY %s: %.6f @ %.2f", symbol, order.amount, order.price)
             self._notify("buy", symbol, order.amount, order.price, decision["reason"], prices=prices)
 

@@ -1,9 +1,10 @@
 capital: 800.0
-coinbase:
+alpaca:
   api_key: ''
   api_secret: ''
+  paper: true
 cycle_interval: 300
-exchange: coinbase
+exchange: alpaca
 llm_advisor:
   api_key: ''
   enabled: false
@@ -12,22 +13,25 @@ mode: paper
 mimo:
   model: mimo-v2-flash
   api_key: ''
+ml:
+  enabled: true
+  model_path: models/stocks.lgbm
+universe:
+  enabled: true
+  size: 1000
+  candidates: 50
+  active_pairs: 30
 pairs:
-- BTC/USD
-- ETH/USD
-- SOL/USD
-- XRP/USD
-- ADA/USD
-- DOT/USD
-- LINK/USD
-- LTC/USD
-- AVAX/USD
-- SHIB/USD
-- DOGE/USD
-- NEAR/USD
-- HBAR/USD
-- UNI/USD
-- POL/USD
+- AAPL
+- MSFT
+- GOOGL
+- AMZN
+- NVDA
+- META
+- TSLA
+- JPM
+- V
+- MA
 reddit:
   client_id: ''
   client_secret: ''
@@ -40,11 +44,3 @@ risk:
   trailing_stop_pct: 0.08
   cooldown_minutes: 30
 strategy: moderate
-ml:
-  enabled: true
-  model_path: models/crypto.lgbm
-universe:
-  enabled: true
-  size: 200
-  candidates: 50
-  active_pairs: 30

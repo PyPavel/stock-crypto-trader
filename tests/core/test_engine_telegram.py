@@ -39,6 +39,13 @@ def test_engine_notifier_defaults_to_none():
     assert engine._notifier is None
 
 
+def _score_and_execute(engine, symbol, prices, can_buy=True):
+    """Helper: run _score_symbol then _execute_decisions (replaces _process_symbol)."""
+    result = engine._score_symbol(symbol, prices)
+    if result is not None:
+        engine._execute_decisions(symbol, result, prices, can_buy=can_buy)
+
+
 def test_notifier_called_on_buy():
     notifier = MagicMock()
     engine = _make_engine(notifier=notifier)
@@ -51,7 +58,7 @@ def test_notifier_called_on_buy():
     engine._signals.atr = MagicMock(return_value=None)
 
     prices = {}
-    engine._process_symbol("BTC-USD", prices)
+    _score_and_execute(engine, "BTC-USD", prices)
 
     notifier.send.assert_called_once()
     msg = notifier.send.call_args[0][0]
@@ -77,7 +84,7 @@ def test_notifier_called_on_sell():
     engine._signals.atr = MagicMock(return_value=None)
 
     prices = {}
-    engine._process_symbol("BTC-USD", prices)
+    _score_and_execute(engine, "BTC-USD", prices)
 
     notifier.send.assert_called_once()
     msg = notifier.send.call_args[0][0]
@@ -96,7 +103,7 @@ def test_notifier_not_called_on_hold():
     engine._signals.atr = MagicMock(return_value=None)
 
     prices = {}
-    engine._process_symbol("BTC-USD", prices)
+    _score_and_execute(engine, "BTC-USD", prices)
 
     notifier.send.assert_not_called()
 
@@ -121,7 +128,7 @@ def test_notifier_called_on_stop_loss():
     engine._signals.atr = MagicMock(return_value=None)
 
     prices = {}
-    engine._process_symbol("BTC-USD", prices)
+    _score_and_execute(engine, "BTC-USD", prices)
 
     notifier.send.assert_called_once()
     msg = notifier.send.call_args[0][0]

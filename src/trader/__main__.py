@@ -85,9 +85,19 @@ def main():
             GoogleTrendsCollector(),     # Search interest trend signal (crypto)
         ]
 
+    from trader.core.universe import SymbolUniverse
+    universe = SymbolUniverse(
+        exchange=cfg.exchange,
+        seed_pairs=cfg.pairs,
+        universe_config=cfg.universe,
+        alpaca_cfg=cfg.alpaca if cfg.exchange == "alpaca" else None,
+    )
+    if cfg.universe.enabled:
+        universe.refresh_universe()
+
     engine = TradingEngine(config=cfg, adapter=adapter, sentiment_analyzer=sentiment,
                            collectors=collectors, numeric_collectors=numeric_collectors,
-                           db_path=args.db, notifier=notifier)
+                           db_path=args.db, notifier=notifier, universe=universe)
 
     label = "STOCK" if cfg.exchange == "alpaca" else "CRYPTO"
     notifier.send(
@@ -109,6 +119,13 @@ def main():
         seconds=cfg.cycle_interval,
         id="trading_cycle",
     )
+    if cfg.universe.enabled:
+        scheduler.add_job(
+            universe.refresh_universe,
+            "interval",
+            hours=24,
+            id="universe_refresh",
+        )
     scheduler.start()
     logger.info(f"Scheduler started, cycle every {cfg.cycle_interval}s")
 

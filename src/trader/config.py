@@ -56,6 +56,14 @@ class LLMAdvisorConfig:
 
 
 @dataclass
+class UniverseConfig:
+    enabled: bool = False    # False = use config.pairs as-is (backward compat)
+    size: int = 200          # universe pool size (crypto: 200, stocks: 1000)
+    candidates: int = 50     # symbols surviving momentum filter
+    active_pairs: int = 30   # symbols actually traded per cycle (top by signal)
+
+
+@dataclass
 class RiskConfig:
     max_position_pct: float = 0.20
     stop_loss_pct: float = 0.05
@@ -100,6 +108,7 @@ class Config:
     risk: RiskConfig = field(default_factory=RiskConfig)
     ml: MLConfig = field(default_factory=MLConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    universe: UniverseConfig = field(default_factory=UniverseConfig)
 
     def to_dict(self):
         import dataclasses
@@ -141,6 +150,7 @@ def load_config(path: str) -> Config:
         ("risk", RiskConfig),
         ("ml", MLConfig),
         ("telegram", TelegramConfig),
+        ("universe", UniverseConfig),
     ]:
         if key in data:
             setattr(cfg, key, cls(**data[key]))
