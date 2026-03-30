@@ -29,9 +29,9 @@ _COINGECKO_MARKETS_URL = (
 )
 
 # Alpaca screener endpoint (data API)
-_ALPACA_MOST_ACTIVES_URL = (
-    "https://data.alpaca.markets/v1beta1/screener/stocks/most_actives"
-    "?by=volume&top={top}"
+_ALPACA_MOVERS_URL = (
+    "https://data.alpaca.markets/v1beta1/screener/stocks/movers"
+    "?top={top}"
 )
 
 _24H_SECONDS = 86_400
@@ -264,19 +264,20 @@ class SymbolUniverse:
 
     def _fetch_alpaca_universe(self) -> list[_SymbolData]:
         """
-        Fetch most-active stocks from Alpaca screener.
+        Fetch top movers (gainers + losers) from Alpaca screener.
 
-        The screener endpoint returns symbols with volume data but not 24h price
-        change.  We derive a proxy: use change = (close - open) / open * 100
-        if available, otherwise 0.  Volume is taken directly.
+        Endpoint: GET /v1beta1/screener/stocks/movers?top=N
+        Returns gainers and losers with percent_change and price.
+        Volume is not available; we use abs(percent_change) as proxy so
+        momentum_score = percent_change * abs(percent_change) = signed(change²).
         """
         if not self._alpaca_api_key or not self._alpaca_api_secret:
             logger.warning("Alpaca API credentials missing — cannot fetch stock universe")
             return []
 
-        # Alpaca screener max is 100 per request; fetch in pages if needed
-        top = min(self._universe_size, 100)
-        url = _ALPACA_MOST_ACTIVES_URL.format(top=top)
+        # Alpaca movers endpoint max is 50 per side (gainers + losers)
+        top = min(self._universe_size // 2, 50)
+        url = _ALPACA_MOVERS_URL.format(top=top)
 
         resp = requests.get(
             url,
@@ -290,28 +291,24 @@ class SymbolUniverse:
         resp.raise_for_status()
         payload = resp.json()
 
-        # Response shape: {"most_actives": [{"symbol": "NVDA", "volume": 123456789,
-        #                                    "trade_count": ..., "change": 2.31}, ...]}
-        entries_raw: list[dict] = payload.get("most_actives", [])
+        # Response: {"gainers": [...], "losers": [...]}
+        # Each entry: {"symbol": "NVDA", "percent_change": 5.2, "change": 4.1, "price": 890.0}
+        gainers: list[dict] = payload.get("gainers", [])
+        losers: list[dict] = payload.get("losers", [])
 
         results: list[_SymbolData] = []
-        for item in entries_raw:
+        for item in gainers + losers:
             symbol: str = item.get("symbol", "").upper()
             if not symbol:
                 continue
-
-            volume = float(item.get("volume") or 0.0)
-            # "change" field is percent change when present; fall back to 0
-            price_change = float(item.get("change") or 0.0)
-
+            pct = float(item.get("percent_change") or 0.0)
+            # Use abs(pct) as volume proxy so momentum = pct * abs(pct) = signed(pct²)
             results.append(
                 _SymbolData(
                     symbol=symbol,
-                    price_change_24h_pct=price_change,
-                    volume_24h=volume,
+                    price_change_24h_pct=pct,
+                    volume_24h=abs(pct),
                 )
             )
 
-        # If universe_size > 100 we can't get more from this endpoint — that's fine,
-        # most_actives top-100 is already the most liquid subset.
         return results

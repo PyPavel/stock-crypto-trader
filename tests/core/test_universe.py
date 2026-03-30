@@ -153,10 +153,8 @@ def test_stock_universe_parses_alpaca_response():
     alpaca_cfg.api_secret = "test-secret"
 
     alpaca_response = {
-        "most_actives": [
-            {"symbol": "NVDA", "volume": 80_000_000, "change": 3.2},
-            {"symbol": "AAPL", "volume": 60_000_000, "change": -1.5},
-        ]
+        "gainers": [{"symbol": "NVDA", "percent_change": 5.2, "price": 890.0}],
+        "losers": [{"symbol": "AAPL", "percent_change": -3.1, "price": 210.0}],
     }
     with patch("requests.get") as mock_get:
         mock_resp = MagicMock()
