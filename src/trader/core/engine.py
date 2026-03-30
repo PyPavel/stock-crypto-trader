@@ -77,14 +77,16 @@ class TradingEngine:
     def _record_trade_time(self, symbol: str) -> None:
         self._last_trade_time[symbol] = datetime.now(timezone.utc)
 
-    def _notify(self, side: str, symbol: str, amount: float, price: float, reason: str) -> None:
+    def _notify(self, side: str, symbol: str, amount: float, price: float, reason: str, prices: dict | None = None) -> None:
         if self._notifier is None:
             return
         label = "CRYPTO" if self.config.exchange != "alpaca" else "STOCK"
+        portfolio_value = self.portfolio.total_value(prices or {})
         msg = (
             f"[{label}] {side.upper()} {symbol}\n"
             f"Amount: {amount:.6f}  Price: ${price:,.2f}\n"
-            f"Reason: {reason}"
+            f"Reason: {reason}\n"
+            f"Portfolio: ${portfolio_value:,.2f}"
         )
         self._notifier.send(msg)
 
@@ -190,7 +192,7 @@ class TradingEngine:
                     "Stop-loss triggered for %s: entry=%.2f, current=%.2f",
                     symbol, entry, price,
                 )
-                self._execute_sell(symbol, position_usd, price, "stop-loss triggered")
+                self._execute_sell(symbol, position_usd, price, "stop-loss triggered", prices=prices)
                 return
 
             # Trailing stop-loss (ATR-adaptive if configured)
@@ -200,7 +202,7 @@ class TradingEngine:
                     "Trailing stop triggered for %s: peak=%.2f, current=%.2f",
                     symbol, peak, price,
                 )
-                self._execute_sell(symbol, position_usd, price, "trailing-stop triggered")
+                self._execute_sell(symbol, position_usd, price, "trailing-stop triggered", prices=prices)
                 return
 
             # Per-trade loss limit
@@ -209,7 +211,7 @@ class TradingEngine:
                     "Per-trade loss limit triggered for %s: entry=%.2f, current=%.2f",
                     symbol, entry, price,
                 )
-                self._execute_sell(symbol, position_usd, price, "per-trade-loss-limit triggered")
+                self._execute_sell(symbol, position_usd, price, "per-trade-loss-limit triggered", prices=prices)
                 return
 
             # Take-profit check (full exit)
@@ -218,7 +220,7 @@ class TradingEngine:
                     "Take-profit triggered for %s: entry=%.2f, current=%.2f (+%.1f%%)",
                     symbol, entry, price, (price - entry) / entry * 100,
                 )
-                self._execute_sell(symbol, position_usd, price, "take-profit triggered")
+                self._execute_sell(symbol, position_usd, price, "take-profit triggered", prices=prices)
                 return
 
             # Partial take-profit check (sell a portion)
@@ -229,7 +231,7 @@ class TradingEngine:
                         "Partial take-profit triggered for %s: entry=%.2f, current=%.2f, selling $%.2f",
                         symbol, entry, price, partial_usd,
                     )
-                    self._execute_sell(symbol, partial_usd, price, "partial-take-profit triggered")
+                    self._execute_sell(symbol, partial_usd, price, "partial-take-profit triggered", prices=prices)
                     return
 
         # 4c. Cooldown check — skip strategy if recently traded
@@ -299,15 +301,15 @@ class TradingEngine:
             self._record_trade_time(symbol)
             self._peak_prices[symbol] = order.price  # initialise peak at entry
             logger.info("BUY %s: %.6f @ %.2f", symbol, order.amount, order.price)
-            self._notify("buy", symbol, order.amount, order.price, decision["reason"])
+            self._notify("buy", symbol, order.amount, order.price, decision["reason"], prices=prices)
 
         elif decision["action"] == "sell" and position_usd > 0:
-            self._execute_sell(symbol, position_usd, price, decision["reason"])
+            self._execute_sell(symbol, position_usd, price, decision["reason"], prices=prices)
 
         else:
             logger.info("HOLD %s: %s", symbol, decision['reason'])
 
-    def _execute_sell(self, symbol: str, position_usd: float, price: float, reason: str) -> None:
+    def _execute_sell(self, symbol: str, position_usd: float, price: float, reason: str, prices: dict | None = None) -> None:
         """Execute a sell order, record the trade, and reset tracking state."""
         is_partial = "partial" in reason.lower()
         order = self._router.execute("sell", symbol, position_usd, price=price)
@@ -320,4 +322,4 @@ class TradingEngine:
         if not is_partial:
             self._peak_prices.pop(symbol, None)
         logger.info("SELL %s: %.6f @ %.2f (%s)", symbol, order.amount, order.price, reason)
-        self._notify("sell", symbol, order.amount, order.price, reason)
+        self._notify("sell", symbol, order.amount, order.price, reason, prices=prices)

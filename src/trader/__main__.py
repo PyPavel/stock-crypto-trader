@@ -89,6 +89,13 @@ def main():
                            collectors=collectors, numeric_collectors=numeric_collectors,
                            db_path=args.db, notifier=notifier)
 
+    label = "STOCK" if cfg.exchange == "alpaca" else "CRYPTO"
+    notifier.send(
+        f"[{label}] Trader started\n"
+        f"Mode: {cfg.mode.upper()}  Strategy: {cfg.strategy}\n"
+        f"Pairs: {', '.join(cfg.pairs[:5])}{'...' if len(cfg.pairs) > 5 else ''}"
+    )
+
     def run_cycle_with_market_check():
         if hasattr(adapter, "is_market_open") and not adapter.is_market_open():
             logger.info("Market is closed — skipping trading cycle")
