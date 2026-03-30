@@ -9,6 +9,10 @@ DEFAULT_FEEDS = [
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "https://cointelegraph.com/rss",
     "https://decrypt.co/feed",
+    "https://bitcoinmagazine.com/.rss/full/",
+    "https://beincrypto.com/feed/",
+    "https://ambcrypto.com/feed/",
+    "https://u.today/rss",
 ]
 
 COIN_KEYWORDS = {
