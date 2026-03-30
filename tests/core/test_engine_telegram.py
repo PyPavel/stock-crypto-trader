@@ -99,3 +99,31 @@ def test_notifier_not_called_on_hold():
     engine._process_symbol("BTC-USD", prices)
 
     notifier.send.assert_not_called()
+
+
+def test_notifier_called_on_stop_loss():
+    from trader.config import RiskConfig
+    notifier = MagicMock()
+    engine = _make_engine(notifier=notifier)
+
+    # Set stop_loss_pct to 5%
+    engine._risk.risk.stop_loss_pct = 0.05
+
+    # Seed a position with entry at 50000; current price 40000 (20% drop, triggers 5% stop)
+    engine.portfolio.positions["BTC-USD"] = {
+        "amount": 0.01, "entry_price": 50000.0, "side": "buy"
+    }
+    engine._peak_prices["BTC-USD"] = 50000.0
+
+    # Mock adapter to return a price that triggers stop-loss
+    engine._adapter.get_price.return_value = 40000.0
+    engine._signals.score_with_trend = MagicMock(return_value={"score": 0.5, "trend_bullish": True})
+    engine._signals.atr = MagicMock(return_value=None)
+
+    prices = {}
+    engine._process_symbol("BTC-USD", prices)
+
+    notifier.send.assert_called_once()
+    msg = notifier.send.call_args[0][0]
+    assert "SELL" in msg
+    assert "BTC-USD" in msg
