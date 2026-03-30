@@ -186,7 +186,9 @@ class TradingEngine:
             if self._ml is not None:
                 ml_score = self._ml.score(candles)
                 if ml_score is not None:
-                    tech_signal = Signal(score=ml_score, trend_bullish=tech_signal.trend_bullish)
+                    tech_signal = Signal(symbol=symbol, score=ml_score,
+                                        reason="ml predictor",
+                                        trend_bullish=tech_signal.trend_bullish)
 
             # 3c. ATR
             current_atr = self._signals.atr(candles, self.config.risk.atr_period)

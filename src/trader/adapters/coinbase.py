@@ -1,7 +1,10 @@
+import logging
 from datetime import datetime, timezone
 import ccxt
 from trader.adapters.base import ExchangeAdapter
 from trader.models import Candle, Order
+
+logger = logging.getLogger(__name__)
 
 INTERVAL_MAP = {"1m": "1m", "5m": "5m", "1h": "1h", "1d": "1d"}
 
@@ -44,6 +47,15 @@ class CoinbaseAdapter(ExchangeAdapter):
             mode="live",
             status=raw.get("status", "filled"),
         )
+
+    def get_tradeable_symbols(self) -> set[str]:
+        """Return all symbols tradeable on Coinbase Advanced."""
+        try:
+            markets = self._exchange.load_markets()
+            return set(markets.keys())
+        except Exception as e:
+            logger.warning("Could not load Coinbase markets: %s", e)
+            return set()
 
     def get_open_orders(self, symbol: str) -> list[Order]:
         raw = self._exchange.fetch_open_orders(symbol)

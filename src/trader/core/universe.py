@@ -69,12 +69,14 @@ class SymbolUniverse:
         seed_pairs: list[str],
         universe_config=None,
         alpaca_cfg=None,
+        valid_symbols: set[str] | None = None,
     ) -> None:
         self._exchange = exchange.lower()
         self._seed_pairs: list[str] = list(seed_pairs)
         self._universe_cfg = universe_config
         self._alpaca_api_key: str = alpaca_cfg.api_key if alpaca_cfg else ""
         self._alpaca_api_secret: str = alpaca_cfg.api_secret if alpaca_cfg else ""
+        self._valid_symbols: set[str] | None = valid_symbols  # None = no filtering
 
         # Derived settings — fall back to defaults when no config supplied
         self._universe_size: int = universe_config.size if universe_config else 200
@@ -155,6 +157,13 @@ class SymbolUniverse:
                 return
 
             if data:
+                # Filter against known-valid exchange symbols if provided
+                if self._valid_symbols:
+                    before = len(data)
+                    data = [d for d in data if d.symbol in self._valid_symbols]
+                    filtered = before - len(data)
+                    if filtered:
+                        logger.info("Universe: filtered %d symbols not on exchange", filtered)
                 self._universe = data
                 self._last_refresh_ts = time.time()
                 logger.info(

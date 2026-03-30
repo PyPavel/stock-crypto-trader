@@ -86,11 +86,16 @@ def main():
         ]
 
     from trader.core.universe import SymbolUniverse
+    valid_symbols: set[str] | None = None
+    if cfg.exchange == "coinbase" and hasattr(adapter, "get_tradeable_symbols"):
+        valid_symbols = adapter.get_tradeable_symbols()
+        logger.info("Loaded %d tradeable symbols from Coinbase", len(valid_symbols))
     universe = SymbolUniverse(
         exchange=cfg.exchange,
         seed_pairs=cfg.pairs,
         universe_config=cfg.universe,
         alpaca_cfg=cfg.alpaca if cfg.exchange == "alpaca" else None,
+        valid_symbols=valid_symbols,
     )
     if cfg.universe.enabled:
         universe.refresh_universe()
