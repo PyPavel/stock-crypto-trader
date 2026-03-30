@@ -77,6 +77,17 @@ class TradingEngine:
     def _record_trade_time(self, symbol: str) -> None:
         self._last_trade_time[symbol] = datetime.now(timezone.utc)
 
+    def _notify(self, side: str, symbol: str, amount: float, price: float, reason: str) -> None:
+        if self._notifier is None:
+            return
+        label = "CRYPTO" if self.config.exchange != "alpaca" else "STOCK"
+        msg = (
+            f"[{label}] {side.upper()} {symbol}\n"
+            f"Amount: {amount:.6f}  Price: ${price:,.2f}\n"
+            f"Reason: {reason}"
+        )
+        self._notifier.send(msg)
+
     def _process_symbol(self, symbol: str, prices: dict) -> None:
         # 1. Market data
         candles = self._adapter.get_candles(symbol, "1h", limit=100)
@@ -288,6 +299,7 @@ class TradingEngine:
             self._record_trade_time(symbol)
             self._peak_prices[symbol] = order.price  # initialise peak at entry
             logger.info("BUY %s: %.6f @ %.2f", symbol, order.amount, order.price)
+            self._notify("buy", symbol, order.amount, order.price, decision["reason"])
 
         elif decision["action"] == "sell" and position_usd > 0:
             self._execute_sell(symbol, position_usd, price, decision["reason"])
@@ -308,3 +320,4 @@ class TradingEngine:
         if not is_partial:
             self._peak_prices.pop(symbol, None)
         logger.info("SELL %s: %.6f @ %.2f (%s)", symbol, order.amount, order.price, reason)
+        self._notify("sell", symbol, order.amount, order.price, reason)
