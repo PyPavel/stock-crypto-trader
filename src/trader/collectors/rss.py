@@ -20,6 +20,17 @@ COIN_KEYWORDS = {
     "ETH": ["ethereum", "eth"],
     "SOL": ["solana", "sol"],
     "ADA": ["cardano", "ada"],
+    "XRP": ["xrp", "ripple"],
+    "DOT": ["dot", "polkadot"],
+    "LINK": ["link", "chainlink"],
+    "LTC": ["litecoin", "ltc"],
+    "AVAX": ["avax", "avalanche"],
+    "SHIB": ["shib", "shiba"],
+    "DOGE": ["doge", "dogecoin"],
+    "NEAR": ["near", "near protocol"],
+    "HBAR": ["hbar", "hedera"],
+    "UNI": ["uni", "uniswap"],
+    "POL": ["pol", "polygon", "matic"],
 }
 
 

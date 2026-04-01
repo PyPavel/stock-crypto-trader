@@ -29,7 +29,7 @@ class AggressiveStrategy(Strategy):
 
         # --- Buy logic: aggressive acts on first signal (no persistence for initial entry) ---
         if combined >= self.buy_threshold:
-            base_amount = min(capital * self.risk.max_position_pct * 2, capital * 0.40)
+            base_amount = capital * self.risk.max_position_pct
 
             if position == 0.0:
                 if not technical.trend_bullish:
