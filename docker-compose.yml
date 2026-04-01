@@ -4,23 +4,43 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.yaml:/app/config.yaml
       - trader-data:/app/data
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
-    depends_on:
-      - ollama
+      - PYTHONPATH=/app/src
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     command: python -m trader --config config.yaml --db /app/data/trader.db
     restart: unless-stopped
 
-  ollama:
-    image: ollama/ollama:latest
+  trader-stocks:
+    build: .
     ports:
-      - "11434:11434"
+      - "127.0.0.1:8001:8000"
     volumes:
-      - ollama-models:/root/.ollama
+      - ./config-stocks.yaml:/app/config.yaml
+      - stocks-data:/app/data
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app/src
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    command: python -m trader --config config.yaml --db /app/data/stocks.db
     restart: unless-stopped
 
 volumes:
   trader-data:
-  ollama-models:
+  stocks-data:

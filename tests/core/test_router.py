@@ -23,7 +23,9 @@ def test_paper_buy_does_not_call_adapter():
 def test_paper_order_calculates_amount_from_price():
     router, adapter = make_router("paper")
     order = router.execute("buy", "BTC/USD", usd_amount=42.0)
-    assert abs(order.amount - 0.001) < 1e-6
+    # With slippage applied: fill_price = 42000 * 1.0005 = 42021.0
+    expected_amount = 42.0 / (42000.0 * 1.0005)
+    assert abs(order.amount - expected_amount) < 1e-6
 
 
 def test_live_buy_calls_adapter():
@@ -37,3 +39,11 @@ def test_paper_sell_returns_sell_order():
     order = router.execute("sell", "BTC/USD", usd_amount=42.0)
     assert order.side == "sell"
     assert order.mode == "paper"
+
+
+def test_zero_price_raises_error():
+    router, adapter = make_router("paper")
+    adapter.get_price.return_value = 0.0
+    import pytest
+    with pytest.raises(ValueError):
+        router.execute("buy", "BTC/USD", usd_amount=10.0, price=0.0)

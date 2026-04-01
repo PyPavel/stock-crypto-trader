@@ -14,8 +14,20 @@ class StrategyRequest(BaseModel):
     strategy: str
 
 
-def create_app(engine) -> FastAPI:
+class CapitalRequest(BaseModel):
+    capital: float
+
+
+def create_app(engine, config_path: str = "config.yaml") -> FastAPI:
     app = FastAPI(title="Trader Dashboard")
+
+    @app.get("/health")
+    async def health():
+        return {
+            "status": "ok",
+            "mode": engine.config.mode,
+            "strategy": engine.config.strategy,
+        }
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
@@ -31,10 +43,12 @@ def create_app(engine) -> FastAPI:
             except Exception:
                 prices[symbol] = 0.0
         return {
+            "exchange": engine.config.exchange,
             "mode": engine.config.mode,
             "strategy": engine.config.strategy,
             "pairs": engine.config.pairs,
             "cash": engine.portfolio.cash,
+            "starting_capital": engine.portfolio.starting_capital,
             "positions": engine.portfolio.positions,
             "total_value": engine.portfolio.total_value(prices),
             "prices": prices,
@@ -55,6 +69,7 @@ def create_app(engine) -> FastAPI:
             raise HTTPException(status_code=400, detail="mode must be 'paper' or 'live'")
         engine.config.mode = req.mode
         engine._router._mode = req.mode
+        engine.config.save(config_path)
         return {"mode": req.mode}
 
     @app.post("/api/strategy")
@@ -64,7 +79,19 @@ def create_app(engine) -> FastAPI:
             raise HTTPException(status_code=400, detail="invalid strategy")
         engine.config.strategy = req.strategy
         engine._strategy = get_strategy(req.strategy, engine.config.risk)
+        engine.config.save(config_path)
         return {"strategy": req.strategy}
+
+    @app.post("/api/capital")
+    async def set_capital(req: CapitalRequest):
+        if req.capital <= 0:
+            raise HTTPException(status_code=400, detail="capital must be positive")
+        # Update both config and active portfolio cash
+        engine.config.capital = req.capital
+        engine.portfolio.cash = req.capital
+        engine.portfolio.starting_capital = req.capital
+        engine.config.save(config_path)
+        return {"capital": req.capital}
 
     @app.post("/api/cycle")
     async def trigger_cycle():

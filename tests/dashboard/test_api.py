@@ -24,7 +24,7 @@ def mock_engine(tmp_path):
 
 @pytest.mark.asyncio
 async def test_status_endpoint(mock_engine):
-    app = create_app(mock_engine)
+    app = create_app(mock_engine, config_path=str(mock_engine.config))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/status")
     assert resp.status_code == 200

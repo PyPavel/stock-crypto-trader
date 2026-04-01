@@ -52,6 +52,9 @@ class TradingEngine:
         # Cooldown: track last trade timestamp per symbol
         self._last_trade_time: dict[str, datetime] = {}
 
+        # Cycle counter for periodic Telegram summaries
+        self._cycle_count: int = 0
+
     def run_cycle(self) -> None:
         logger.info("Starting trading cycle")
 
@@ -96,6 +99,11 @@ class TradingEngine:
             except Exception as e:
                 logger.exception("Error executing decisions for %s: %s", symbol, e)
 
+        # Periodic Telegram summary every 6 cycles (~30 min)
+        self._cycle_count += 1
+        if self._notifier and self._cycle_count % 6 == 0:
+            self._send_cycle_summary(prices)
+
     def _in_cooldown(self, symbol: str) -> bool:
         """Returns True if the symbol is still within its post-trade cooldown period."""
         last = self._last_trade_time.get(symbol)
@@ -119,6 +127,28 @@ class TradingEngine:
             f"Portfolio: ${portfolio_value:,.2f}"
         )
         self._notifier.send(msg)
+
+    def _send_cycle_summary(self, prices: dict) -> None:
+        """Send a brief portfolio status to Telegram every N cycles."""
+        label = "CRYPTO" if self.config.exchange != "alpaca" else "STOCK"
+        portfolio_value = self.portfolio.total_value(prices)
+        positions = self.portfolio.positions
+        cash = self.portfolio.cash
+
+        lines = [f"[{label}] Portfolio update"]
+        lines.append(f"Value: ${portfolio_value:,.2f}  Cash: ${cash:,.2f}")
+        if positions:
+            lines.append(f"Positions ({len(positions)}):")
+            for sym, pos in sorted(positions.items()):
+                amt = pos["amount"] if isinstance(pos, dict) else pos
+                entry = pos.get("entry_price", 0) if isinstance(pos, dict) else 0
+                price = prices.get(sym, 0)
+                current_val = amt * price
+                pnl = current_val - amt * entry if entry else 0
+                lines.append(f"  {sym}: ${current_val:,.2f} (PnL {pnl:+.2f})")
+        else:
+            lines.append("No open positions")
+        self._notifier.send("\n".join(lines))
 
     def _score_symbol(self, symbol: str, prices: dict) -> dict | None:
         """

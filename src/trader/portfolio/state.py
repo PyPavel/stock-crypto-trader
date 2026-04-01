@@ -23,8 +23,13 @@ class Portfolio:
         if trade.side == "buy":
             self.cash -= cost
             pos = self.positions.setdefault(trade.symbol, {"amount": 0.0, "entry_price": 0.0})
-            pos["amount"] += trade.amount
-            pos["entry_price"] = trade.price
+            old_amount = pos["amount"]
+            new_amount = old_amount + trade.amount
+            if new_amount > 0 and old_amount > 0:
+                pos["entry_price"] = (old_amount * pos["entry_price"] + trade.amount * trade.price) / new_amount
+            else:
+                pos["entry_price"] = trade.price
+            pos["amount"] = new_amount
         else:
             self.cash += trade.amount * trade.price - trade.fee
             if trade.symbol in self.positions:

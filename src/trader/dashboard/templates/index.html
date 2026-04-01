@@ -16,11 +16,16 @@
   </style>
 </head>
 <body>
-  <h1>Trader Dashboard</h1>
+  <h1>Trader Dashboard — <span id="exchange-title">...</span></h1>
   <div class="card">
     <h2>Status</h2>
-    <p>Mode: <strong id="mode">-</strong> &nbsp; Strategy: <strong id="strategy">-</strong></p>
+    <p>Exchange: <strong id="exchange">-</strong> &nbsp; Mode: <strong id="mode">-</strong> &nbsp; Strategy: <strong id="strategy">-</strong></p>
     <p>Cash: <strong id="cash">-</strong> &nbsp; Total Value: <strong id="total">-</strong></p>
+    <p>PnL: <strong id="pnl">-</strong></p>
+    <p>
+      Capital: <input type="number" id="capital-input" style="width: 80px; background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 6px; border-radius: 4px;">
+      <button onclick="setCapital()">Set Capital</button>
+    </p>
     <p>
       <select id="mode-select" onchange="setMode(this.value)">
         <option value="paper">Paper</option>
@@ -45,12 +50,31 @@
     async function loadStatus() {
       const r = await fetch('/api/status');
       const d = await r.json();
+      document.getElementById('exchange').textContent = d.exchange;
+      document.getElementById('exchange-title').textContent = d.exchange.toUpperCase();
+      document.title = 'Trader — ' + d.exchange.toUpperCase();
       document.getElementById('mode').textContent = d.mode;
       document.getElementById('strategy').textContent = d.strategy;
       document.getElementById('cash').textContent = '$' + d.cash.toFixed(2);
       document.getElementById('total').textContent = '$' + d.total_value.toFixed(2);
+      
+      const pnl = d.total_value - d.starting_capital;
+      const pnlPct = (pnl / d.starting_capital) * 100;
+      const pnlEl = document.getElementById('pnl');
+      pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct.toFixed(2)}%)`;
+      pnlEl.className = pnl >= 0 ? 'green' : 'red';
+
       document.getElementById('mode-select').value = d.mode;
       document.getElementById('strategy-select').value = d.strategy;
+      if (document.activeElement.id !== 'capital-input') {
+        document.getElementById('capital-input').value = d.cash.toFixed(2);
+      }
+    }
+    async function setCapital() {
+      const capital = parseFloat(document.getElementById('capital-input').value);
+      if (isNaN(capital) || capital <= 0) return alert('Enter valid capital');
+      await fetch('/api/capital', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capital})});
+      loadStatus();
     }
     async function loadTrades() {
       const r = await fetch('/api/trades');

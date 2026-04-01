@@ -39,9 +39,9 @@ risk:
   stop_loss_pct: 0.05
   trailing_stop_pct: 0.08
   cooldown_minutes: 30
-strategy: moderate
+strategy: aggressive
 ml:
-  enabled: true
+  enabled: false
   model_path: models/crypto.lgbm
 universe:
   enabled: true

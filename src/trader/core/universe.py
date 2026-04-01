@@ -36,6 +36,14 @@ _ALPACA_MOVERS_URL = (
 
 _24H_SECONDS = 86_400
 
+# Symbols to never trade: stablecoins, wrapped tokens, gold-backed tokens
+_BLOCKED_SYMBOLS: frozenset[str] = frozenset({
+    "USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "GUSD", "FRAX", "LUSD",
+    "USD1", "USDS", "PYUSD", "FDUSD", "EURC",
+    "WBTC", "WETH", "WBNB",
+    "PAXG", "XAUT",
+})
+
 
 @dataclass
 class _SymbolData:
@@ -164,6 +172,12 @@ class SymbolUniverse:
                     filtered = before - len(data)
                     if filtered:
                         logger.info("Universe: filtered %d symbols not on exchange", filtered)
+                # Filter out stablecoins, wrapped tokens, and gold-backed tokens
+                before = len(data)
+                data = [d for d in data if d.symbol.split("/")[0].upper() not in _BLOCKED_SYMBOLS]
+                blocked = before - len(data)
+                if blocked:
+                    logger.info("Universe: filtered %d blocked symbols (stablecoins/wrapped)", blocked)
                 self._universe = data
                 self._last_refresh_ts = time.time()
                 logger.info(
