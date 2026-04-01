@@ -44,4 +44,4 @@ risk:
   trailing_stop_pct: 0.08
   cooldown_minutes: 30
   max_daily_loss_pct: 0.03
-strategy: moderate
+strategy: aggressive
