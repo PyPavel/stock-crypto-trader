@@ -13,6 +13,7 @@ Stage 2: Momentum filter every cycle
 
 from __future__ import annotations
 
+import bisect
 import logging
 import time
 from dataclasses import dataclass, field
@@ -29,9 +30,9 @@ _COINGECKO_MARKETS_URL = (
 )
 
 # Alpaca screener endpoint (data API)
-_ALPACA_MOVERS_URL = (
-    "https://data.alpaca.markets/v1beta1/screener/stocks/movers"
-    "?top={top}"
+_ALPACA_ACTIVES_URL = (
+    "https://data.alpaca.markets/v1beta1/screener/stocks/most_actives"
+    "?by=volume&top={top}"
 )
 
 _24H_SECONDS = 86_400
@@ -203,10 +204,11 @@ class SymbolUniverse:
 
     def _score_momentum(self) -> list[tuple[str, float]]:
         """
-        Compute momentum_score = price_change_24h_pct × volume_ratio for each
+        Compute momentum_score = price_change_24h_pct × volume_percentile_rank for each
         symbol in the universe.
 
-        volume_ratio = symbol_volume / mean_volume_of_universe
+        volume_percentile_rank is the fraction of universe symbols with lower volume (0–1),
+        which normalises for scale differences between symbols (e.g. BTC vs altcoins).
 
         Returns list of (symbol, score) tuples.  Symbols that fail scoring are
         silently skipped.
@@ -215,15 +217,15 @@ class SymbolUniverse:
         if not volumes:
             return []
 
-        mean_vol = sum(volumes) / len(volumes)
-        if mean_vol == 0:
-            return []
+        sorted_volumes = sorted(volumes)
+        n = len(sorted_volumes)
 
         results: list[tuple[str, float]] = []
         for entry in self._universe:
             try:
-                volume_ratio = entry.volume_24h / mean_vol
-                score = entry.price_change_24h_pct * volume_ratio
+                # bisect_right gives count of values <= entry.volume_24h
+                rank = bisect.bisect_right(sorted_volumes, entry.volume_24h) / n
+                score = entry.price_change_24h_pct * rank
                 results.append((entry.symbol, score))
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Skipping %s in momentum scoring: %s", entry.symbol, exc)
@@ -287,20 +289,17 @@ class SymbolUniverse:
 
     def _fetch_alpaca_universe(self) -> list[_SymbolData]:
         """
-        Fetch top movers (gainers + losers) from Alpaca screener.
+        Fetch most-active stocks by volume from Alpaca screener.
 
-        Endpoint: GET /v1beta1/screener/stocks/movers?top=N
-        Returns gainers and losers with percent_change and price.
-        Volume is not available; we use abs(percent_change) as proxy so
-        momentum_score = percent_change * abs(percent_change) = signed(change²).
+        Endpoint: GET /v1beta1/screener/stocks/most_actives?by=volume&top=N
+        Returns actual dollar volume so momentum scoring is volume-weighted correctly.
         """
         if not self._alpaca_api_key or not self._alpaca_api_secret:
             logger.warning("Alpaca API credentials missing — cannot fetch stock universe")
             return []
 
-        # Alpaca movers endpoint max is 50 per side (gainers + losers)
-        top = min(self._universe_size // 2, 50)
-        url = _ALPACA_MOVERS_URL.format(top=top)
+        top = min(self._universe_size, 200)
+        url = _ALPACA_ACTIVES_URL.format(top=top)
 
         resp = requests.get(
             url,
@@ -314,23 +313,19 @@ class SymbolUniverse:
         resp.raise_for_status()
         payload = resp.json()
 
-        # Response: {"gainers": [...], "losers": [...]}
-        # Each entry: {"symbol": "NVDA", "percent_change": 5.2, "change": 4.1, "price": 890.0}
-        gainers: list[dict] = payload.get("gainers", [])
-        losers: list[dict] = payload.get("losers", [])
-
+        # Response: {"most_actives": [{"symbol": "NVDA", "volume": 45678901, "percent_change": 1.4, ...}]}
         results: list[_SymbolData] = []
-        for item in gainers + losers:
+        for item in payload.get("most_actives", []):
             symbol: str = item.get("symbol", "").upper()
             if not symbol:
                 continue
             pct = float(item.get("percent_change") or 0.0)
-            # Use abs(pct) as volume proxy so momentum = pct * abs(pct) = signed(pct²)
+            volume = float(item.get("volume") or 0.0)
             results.append(
                 _SymbolData(
                     symbol=symbol,
                     price_change_24h_pct=pct,
-                    volume_24h=abs(pct),
+                    volume_24h=volume,
                 )
             )
 

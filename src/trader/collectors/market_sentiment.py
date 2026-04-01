@@ -1,5 +1,5 @@
-# Re-export FearGreedCollector as MarketSentimentCollector.
-# Both crypto and stock paths use the same alternative.me Fear & Greed API.
-from trader.collectors.feargreed import FearGreedCollector as MarketSentimentCollector
+# Stocks path uses VIX-based sentiment (CBOE volatility index via Yahoo Finance).
+# Crypto path uses FearGreedCollector directly — do not use this for crypto.
+from trader.collectors.vix_sentiment import VIXSentimentCollector as MarketSentimentCollector
 
 __all__ = ["MarketSentimentCollector"]

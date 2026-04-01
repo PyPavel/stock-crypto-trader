@@ -211,26 +211,28 @@ class TradingEngine:
                 trend_bullish=trend_bullish,
             )
 
-            # 3b. ML score override
+            # 3b. ML score — blend with tech rather than override
             ml_score = None
             if self._ml is not None:
                 ml_score = self._ml.score(candles)
-                if ml_score is not None:
-                    tech_signal = Signal(symbol=symbol, score=ml_score,
-                                        reason="ml predictor",
-                                        trend_bullish=tech_signal.trend_bullish)
 
             # 3c. ATR
             current_atr = self._signals.atr(candles, self.config.risk.atr_period)
 
             # Combined score used for ranking candidates
-            active_score = ml_score if ml_score is not None else tech_score
+            if ml_score is not None:
+                active_score = ml_score * 0.7 + tech_score * 0.3
+                tech_signal = Signal(symbol=symbol, score=active_score,
+                                     reason="ml+tech blend",
+                                     trend_bullish=tech_signal.trend_bullish)
+            else:
+                active_score = tech_score
             combined_score = active_score * 0.6 + raw_sentiment * 0.4
 
             if ml_score is not None:
                 logger.info(
-                    "%s price=%.2f tech=%.3f ml=%.3f(active) trend=%s sentiment=%.3f atr=%.2f texts=%d",
-                    symbol, price, tech_score, ml_score, "bull" if trend_bullish else "bear",
+                    "%s price=%.2f tech=%.3f ml=%.3f blend=%.3f(active) trend=%s sentiment=%.3f atr=%.2f texts=%d",
+                    symbol, price, tech_score, ml_score, active_score, "bull" if trend_bullish else "bear",
                     raw_sentiment, current_atr or 0.0, len(texts),
                 )
             else:
