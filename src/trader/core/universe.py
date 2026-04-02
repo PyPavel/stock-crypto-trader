@@ -29,11 +29,6 @@ _COINGECKO_MARKETS_URL = (
     "&price_change_percentage=24h"
 )
 
-# Alpaca screener endpoint (data API)
-_ALPACA_ACTIVES_URL = (
-    "https://data.alpaca.markets/v1beta1/screener/stocks/most_actives"
-    "?by=volume&top={top}"
-)
 
 _24H_SECONDS = 86_400
 
@@ -289,38 +284,35 @@ class SymbolUniverse:
 
     def _fetch_alpaca_universe(self) -> list[_SymbolData]:
         """
-        Fetch most-active stocks by volume from Alpaca screener.
+        Fetch most-active US stocks by volume using Yahoo Finance screener.
 
-        Endpoint: GET /v1beta1/screener/stocks/most_actives?by=volume&top=N
-        Returns actual dollar volume so momentum scoring is volume-weighted correctly.
+        Uses yfinance.screen('most_actives') — free, no API key required.
+        Returns up to universe_size symbols with price change % and volume for
+        momentum scoring.
         """
-        if not self._alpaca_api_key or not self._alpaca_api_secret:
-            logger.warning("Alpaca API credentials missing — cannot fetch stock universe")
+        try:
+            import yfinance as yf
+        except ImportError:
+            logger.warning("yfinance not installed — cannot fetch stock universe. Run: pip install yfinance")
             return []
 
-        top = min(self._universe_size, 200)
-        url = _ALPACA_ACTIVES_URL.format(top=top)
+        top = min(self._universe_size, 250)  # Yahoo screener supports up to 250 per call
+        try:
+            payload = yf.screen("most_actives", count=top)
+        except Exception as e:
+            logger.warning("yfinance screener failed: %s", e)
+            return []
 
-        resp = requests.get(
-            url,
-            timeout=15,
-            headers={
-                "APCA-API-KEY-ID": self._alpaca_api_key,
-                "APCA-API-SECRET-KEY": self._alpaca_api_secret,
-                "User-Agent": "trader-bot/1.0",
-            },
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-
-        # Response: {"most_actives": [{"symbol": "NVDA", "volume": 45678901, "percent_change": 1.4, ...}]}
         results: list[_SymbolData] = []
-        for item in payload.get("most_actives", []):
+        for item in payload.get("quotes", []):
             symbol: str = item.get("symbol", "").upper()
             if not symbol:
                 continue
-            pct = float(item.get("percent_change") or 0.0)
-            volume = float(item.get("volume") or 0.0)
+            # Skip non-US equities and symbols with slashes (foreign ordinaries etc.)
+            if "/" in symbol or "." in symbol:
+                continue
+            pct = float(item.get("regularMarketChangePercent") or 0.0)
+            volume = float(item.get("regularMarketVolume") or 0.0)
             results.append(
                 _SymbolData(
                     symbol=symbol,
@@ -329,4 +321,5 @@ class SymbolUniverse:
                 )
             )
 
+        logger.info("yfinance screener returned %d most-active stocks", len(results))
         return results

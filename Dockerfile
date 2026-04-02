@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir hatchling && \
     pip install --no-cache-dir -e . --no-deps && \
     pip install --no-cache-dir ccxt pandas numpy praw requests openai \
         fastapi uvicorn pyyaml pydantic jinja2 apscheduler alpaca-py pytz pytrends \
-        lightgbm scikit-learn pyarrow
+        lightgbm scikit-learn pyarrow yfinance
 
 COPY src/ src/
 COPY config.yaml .
