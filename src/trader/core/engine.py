@@ -122,6 +122,9 @@ class TradingEngine:
         for sym, hist in self._strategy._signal_history.items():
             save_signal_history(self.portfolio._conn, sym, hist)
 
+        # Signal alerts — strong signals with news context, even when no trade fires
+        self._send_signal_alerts(scored, prices)
+
         # Periodic Telegram summary every 6 cycles (~30 min)
         self._cycle_count += 1
         if self._notifier and self._cycle_count % 6 == 0:
@@ -138,21 +141,95 @@ class TradingEngine:
     def _record_trade_time(self, symbol: str) -> None:
         self._last_trade_time[symbol] = datetime.now(timezone.utc)
 
-    def _notify(self, side: str, symbol: str, amount: float, price: float, reason: str, prices: dict | None = None) -> None:
+    def _notify(self, side: str, symbol: str, amount: float, price: float, reason: str,
+                prices: dict | None = None, result: dict | None = None) -> None:
         if self._notifier is None:
             return
         label = "CRYPTO" if self.config.exchange != "alpaca" else "STOCK"
         portfolio_value = self.portfolio.total_value(prices or {})
-        msg = (
-            f"[{label}] {side.upper()} {symbol}\n"
-            f"Amount: {amount:.6f}  Price: ${price:,.2f}\n"
-            f"Reason: {reason}\n"
-            f"Portfolio: ${portfolio_value:,.2f}"
-        )
-        self._notifier.send(msg)
+
+        # Format price with enough decimals for micro-priced tokens
+        price_str = f"${price:,.6f}".rstrip("0").rstrip(".") if price < 0.01 else f"${price:,.2f}"
+
+        lines = [f"[{label}] {side.upper()} {symbol}"]
+        lines.append(f"Price: {price_str}  Amount: {amount:.4f}")
+        lines.append(f"Reason: {reason}")
+
+        # Signal breakdown
+        if result:
+            tech = result.get("tech_score", 0.0)
+            sent = result.get("raw_sentiment", 0.0)
+            combo = result.get("combined_score", 0.0)
+            trend = "bull" if result.get("trend_bullish") else "bear"
+            ml = result.get("ml_score")
+            if ml is not None:
+                lines.append(f"Signals: tech={tech:+.2f} ml={ml:+.2f} sent={sent:+.2f} => {combo:+.2f} ({trend})")
+            else:
+                lines.append(f"Signals: tech={tech:+.2f} sent={sent:+.2f} => {combo:+.2f} ({trend})")
+
+            # Top texts that drove the decision (truncated)
+            texts = result.get("texts", [])
+            for t in texts[:2]:
+                snippet = t[:120].replace("\n", " ")
+                lines.append(f"  >> {snippet}")
+
+        lines.append(f"Portfolio: ${portfolio_value:,.2f}")
+        self._notifier.send("\n".join(lines))
+
+    def _send_signal_alerts(self, scored: list[tuple[str, dict]], prices: dict) -> None:
+        """
+        Send Telegram alerts for strong signals that weren't traded (due to limits,
+        cooldown, or bearish trend). Fires at most 3 alerts per cycle to avoid spam.
+        Threshold: |combined_score| >= 0.35 or |raw_sentiment| >= 0.40.
+        """
+        if self._notifier is None:
+            return
+
+        label = "CRYPTO" if self.config.exchange != "alpaca" else "STOCK"
+        SCORE_THRESHOLD = 0.35
+        SENTIMENT_THRESHOLD = 0.40
+        MAX_ALERTS = 3
+
+        # Find symbols with strong signals that we're not executing a trade on right now
+        open_syms = set(self.portfolio.positions.keys())
+        alerts = []
+        for sym, r in scored:
+            combo = r.get("combined_score", 0.0)
+            sent = r.get("raw_sentiment", 0.0)
+            texts = r.get("texts", [])
+            # Only alert if signal is strong AND there are actual texts explaining why
+            if (abs(combo) >= SCORE_THRESHOLD or abs(sent) >= SENTIMENT_THRESHOLD) and texts:
+                alerts.append((sym, r, combo))
+
+        # Sort by abs(score) descending, cap at MAX_ALERTS
+        alerts.sort(key=lambda x: abs(x[2]), reverse=True)
+        for sym, r, combo in alerts[:MAX_ALERTS]:
+            tech = r.get("tech_score", 0.0)
+            sent = r.get("raw_sentiment", 0.0)
+            trend = "bull" if r.get("trend_bullish") else "bear"
+            ml = r.get("ml_score")
+            price = prices.get(sym, 0.0)
+            price_str = f"${price:,.6f}".rstrip("0").rstrip(".") if price < 0.01 else f"${price:,.2f}"
+            direction = "BULLISH" if combo > 0 else "BEARISH"
+            in_position = sym in open_syms
+
+            lines = [f"[{label}] {direction} SIGNAL: {sym} ({combo:+.2f})"]
+            lines.append(f"Price: {price_str}  Trend: {trend}")
+            if ml is not None:
+                lines.append(f"tech={tech:+.2f} ml={ml:+.2f} sent={sent:+.2f}")
+            else:
+                lines.append(f"tech={tech:+.2f} sent={sent:+.2f}")
+            lines.append(f"Position: {'OPEN' if in_position else 'none'}")
+
+            texts = r.get("texts", [])
+            for t in texts[:3]:
+                snippet = t[:140].replace("\n", " ")
+                lines.append(f"  >> {snippet}")
+
+            self._notifier.send("\n".join(lines))
 
     def _send_cycle_summary(self, prices: dict) -> None:
-        """Send a brief portfolio status to Telegram every N cycles."""
+        """Send a brief portfolio status + top signals to Telegram every N cycles."""
         label = "CRYPTO" if self.config.exchange != "alpaca" else "STOCK"
         portfolio_value = self.portfolio.total_value(prices)
         positions = self.portfolio.positions
@@ -168,9 +245,19 @@ class TradingEngine:
                 price = prices.get(sym, 0)
                 current_val = amt * price
                 pnl = current_val - amt * entry if entry else 0
-                lines.append(f"  {sym}: ${current_val:,.2f} (PnL {pnl:+.2f})")
+                pnl_pct = (pnl / (amt * entry) * 100) if entry and amt else 0
+                lines.append(f"  {sym}: ${current_val:,.2f} (PnL {pnl:+.2f} / {pnl_pct:+.1f}%)")
         else:
             lines.append("No open positions")
+
+        # Top 3 signals this cycle
+        if self._current_scores:
+            top = sorted(self._current_scores.items(), key=lambda x: abs(x[1]), reverse=True)[:3]
+            lines.append("Top signals:")
+            for sym, score in top:
+                arrow = "▲" if score > 0 else "▼"
+                lines.append(f"  {arrow} {sym}: {score:+.2f}")
+
         self._notifier.send("\n".join(lines))
 
     def _score_symbol(self, symbol: str, prices: dict) -> dict | None:
@@ -315,7 +402,7 @@ class TradingEngine:
                     "Stop-loss triggered for %s: entry=%.2f, current=%.2f",
                     symbol, entry, price,
                 )
-                self._execute_sell(symbol, position_usd, price, "stop-loss triggered", prices=prices)
+                self._execute_sell(symbol, position_usd, price, "stop-loss triggered", prices=prices, result=result)
                 return
 
             peak = self._peak_prices.get(symbol, price)
@@ -324,7 +411,7 @@ class TradingEngine:
                     "Trailing stop triggered for %s: peak=%.2f, current=%.2f",
                     symbol, peak, price,
                 )
-                self._execute_sell(symbol, position_usd, price, "trailing-stop triggered", prices=prices)
+                self._execute_sell(symbol, position_usd, price, "trailing-stop triggered", prices=prices, result=result)
                 return
 
             if self._risk.check_trade_loss_limit(entry, price, self.portfolio.starting_capital):
@@ -332,7 +419,7 @@ class TradingEngine:
                     "Per-trade loss limit triggered for %s: entry=%.2f, current=%.2f",
                     symbol, entry, price,
                 )
-                self._execute_sell(symbol, position_usd, price, "per-trade-loss-limit triggered", prices=prices)
+                self._execute_sell(symbol, position_usd, price, "per-trade-loss-limit triggered", prices=prices, result=result)
                 return
 
             if self._risk.check_take_profit(entry, price):
@@ -340,7 +427,7 @@ class TradingEngine:
                     "Take-profit triggered for %s: entry=%.2f, current=%.2f (+%.1f%%)",
                     symbol, entry, price, (price - entry) / entry * 100,
                 )
-                self._execute_sell(symbol, position_usd, price, "take-profit triggered", prices=prices)
+                self._execute_sell(symbol, position_usd, price, "take-profit triggered", prices=prices, result=result)
                 return
 
         # 4c. Cooldown check (partial TP also respects cooldown — prevents cascade halving)
@@ -361,7 +448,7 @@ class TradingEngine:
                         "Partial take-profit triggered for %s: entry=%.4f, current=%.4f, selling $%.2f",
                         symbol, entry, price, partial_usd,
                     )
-                    self._execute_sell(symbol, partial_usd, price, "partial-take-profit triggered", prices=prices)
+                    self._execute_sell(symbol, partial_usd, price, "partial-take-profit triggered", prices=prices, result=result)
                     return
 
         # 5. Strategy decision
@@ -440,10 +527,10 @@ class TradingEngine:
             self._record_trade_time(symbol)
             self._peak_prices[symbol] = order.price
             logger.info("BUY %s: %.6f @ %.2f", symbol, order.amount, order.price)
-            self._notify("buy", symbol, order.amount, order.price, decision["reason"], prices=prices)
+            self._notify("buy", symbol, order.amount, order.price, decision["reason"], prices=prices, result=result)
 
         elif decision["action"] == "sell" and position_usd > 0:
-            self._execute_sell(symbol, position_usd, price, decision["reason"], prices=prices)
+            self._execute_sell(symbol, position_usd, price, decision["reason"], prices=prices, result=result)
 
         else:
             logger.info("HOLD %s: %s", symbol, decision['reason'])
@@ -481,7 +568,8 @@ class TradingEngine:
                            f"rotation — replaced by {new_symbol}", prices=prices)
         return True
 
-    def _execute_sell(self, symbol: str, position_usd: float, price: float, reason: str, prices: dict | None = None) -> None:
+    def _execute_sell(self, symbol: str, position_usd: float, price: float, reason: str,
+                      prices: dict | None = None, result: dict | None = None) -> None:
         """Execute a sell order, record the trade, and reset tracking state."""
         is_partial = "partial" in reason.lower()
         order = self._router.execute("sell", symbol, position_usd, price=price)
@@ -494,4 +582,4 @@ class TradingEngine:
         if not is_partial:
             self._peak_prices.pop(symbol, None)
         logger.info("SELL %s: %.6f @ %.2f (%s)", symbol, order.amount, order.price, reason)
-        self._notify("sell", symbol, order.amount, order.price, reason, prices=prices)
+        self._notify("sell", symbol, order.amount, order.price, reason, prices=prices, result=result)
