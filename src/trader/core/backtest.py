@@ -11,11 +11,14 @@ SLIPPAGE = 0.0005  # 0.05% slippage
 
 
 class Backtester:
-    def __init__(self, strategy: Strategy, starting_capital: float = 100.0):
+    def __init__(self, strategy: Strategy, starting_capital: float = 100.0,
+                 ml_predictor=None, sentiment_bias: float = 0.0):
         self._strategy = strategy
         self._starting_capital = starting_capital
         self._signals = SignalGenerator()
         self._risk = RiskManager(strategy.risk)
+        self._ml = ml_predictor          # optional MLPredictor — same interface as live engine
+        self._sentiment_bias = sentiment_bias  # static sentiment offset (0.0 = neutral)
 
     def run(self, symbol: str, candles: list[Candle]) -> dict:
         """Run backtest on a single symbol."""
@@ -54,7 +57,7 @@ class Backtester:
         neutral_sentiments: dict[str, SentimentScore] = {}
         for sym in symbol_candles:
             neutral_sentiments[sym] = SentimentScore(
-                symbol=sym, score=0.0, source="backtest", items_analyzed=0
+                symbol=sym, score=self._sentiment_bias, source="backtest", items_analyzed=0
             )
 
         # Per-symbol candle history window for signal generation
@@ -158,8 +161,13 @@ class Backtester:
                 # 4. Signal + strategy
                 tech_score = self._signals.score(window)
                 tech_result = self._signals.score_with_trend(window)
+                if self._ml is not None:
+                    ml_score = self._ml.score(window)
+                    active_score = ml_score * 0.7 + tech_score * 0.3 if ml_score is not None else tech_score
+                else:
+                    active_score = tech_score
                 tech_signal = Signal(
-                    symbol=sym, score=tech_score, reason="backtest",
+                    symbol=sym, score=active_score, reason="backtest",
                     trend_bullish=tech_result["trend_bullish"],
                 )
 

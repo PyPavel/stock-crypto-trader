@@ -44,4 +44,13 @@ risk:
   trailing_stop_pct: 0.08
   cooldown_minutes: 30
   max_daily_loss_pct: 0.03
+  take_profit_pct: 0.20
+  partial_tp_trigger_pct: 0.10
+  partial_take_profit_pct: 0.50
+  min_cash_reserve_pct: 0.10
+  conviction_size_multiplier: 1.25
+  max_correlated_positions: 2
+  correlation_groups:
+    mega_tech: [AAPL, MSFT, GOOGL, AMZN, META, NVDA]
+    fintech: [JPM, V, MA]
 strategy: aggressive

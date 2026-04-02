@@ -89,6 +89,10 @@ class RiskConfig:
     # Loss limits
     max_daily_loss_pct: float = 0.0       # 0 = disabled; halt trading if daily loss exceeds this
     max_trade_loss_pct: float = 0.0       # 0 = disabled; max loss on a single trade as % of capital
+    # Cash management
+    min_cash_reserve_pct: float = 0.0     # always keep this fraction of starting capital as cash
+    # Conviction sizing — allow high-conviction positions to exceed max_position_pct
+    conviction_size_multiplier: float = 1.0  # e.g. 1.25 lets strong signals use 25% more capital
 
 
 @dataclass

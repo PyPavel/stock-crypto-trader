@@ -1,5 +1,6 @@
 import inspect
 import logging
+from collections import deque
 from datetime import datetime, timezone
 from trader.config import Config
 from trader.adapters.base import ExchangeAdapter
@@ -9,6 +10,7 @@ from trader.core.signals import SignalGenerator
 from trader.core.risk import RiskManager
 from trader.core.router import OrderRouter
 from trader.portfolio.state import Portfolio
+from trader.portfolio.db import save_signal_history, load_signal_history
 from trader.strategies.registry import get_strategy
 from trader.models import SentimentScore, Trade, Signal
 from trader.ml.predictor import MLPredictor
@@ -55,6 +57,16 @@ class TradingEngine:
         # Cycle counter for periodic Telegram summaries
         self._cycle_count: int = 0
 
+        # Current cycle scores — used for position rotation decisions
+        self._current_scores: dict[str, float] = {}
+
+        # Restore persisted signal history so persistence checks survive restarts
+        history = load_signal_history(self.portfolio._conn)
+        for sym, scores in history.items():
+            self._strategy._signal_history[sym] = deque(
+                scores, maxlen=self._strategy._history_maxlen
+            )
+
     def run_cycle(self) -> None:
         logger.info("Starting trading cycle")
 
@@ -82,6 +94,9 @@ class TradingEngine:
             if result is not None:
                 scored.append((symbol, result))
 
+        # Update current scores for rotation logic
+        self._current_scores = {s: r["combined_score"] for s, r in scored}
+
         # Stage 2: determine buy-eligible set — top active_pairs from candidates by signal
         n_active = self.config.universe.active_pairs if self.config.universe.enabled else len(self.config.pairs)
         candidate_set = set(candidates)
@@ -98,6 +113,10 @@ class TradingEngine:
                 self._execute_decisions(symbol, result, prices, can_buy=(symbol in buy_eligible))
             except Exception as e:
                 logger.exception("Error executing decisions for %s: %s", symbol, e)
+
+        # Persist signal history for restart recovery
+        for sym, hist in self._strategy._signal_history.items():
+            save_signal_history(self.portfolio._conn, sym, hist)
 
         # Periodic Telegram summary every 6 cycles (~30 min)
         self._cycle_count += 1
@@ -382,6 +401,21 @@ class TradingEngine:
                         decision['usd_amount'], max_allowed,
                     )
                     final_usd = max_allowed
+                elif "max open positions" in risk_check["reason"] and \
+                        self._try_position_rotation(symbol, result["combined_score"], prices):
+                    # Rotation closed the weakest position — re-validate
+                    risk_check = self._risk.validate_buy(
+                        symbol=symbol,
+                        usd_amount=decision["usd_amount"],
+                        capital=self.portfolio.cash,
+                        positions=self.portfolio.positions,
+                        starting_capital=self.portfolio.starting_capital,
+                        prices=prices,
+                        daily_pnl=daily_pnl,
+                    )
+                    if not risk_check["allowed"]:
+                        logger.info("Buy blocked after rotation: %s", risk_check["reason"])
+                        return
                 else:
                     logger.info("Buy blocked by risk manager: %s", risk_check['reason'])
                     return
@@ -406,6 +440,39 @@ class TradingEngine:
 
         else:
             logger.info("HOLD %s: %s", symbol, decision['reason'])
+
+    def _try_position_rotation(self, new_symbol: str, new_score: float, prices: dict) -> bool:
+        """
+        Close the weakest open position to make room for a stronger signal.
+        Returns True if a position was closed (caller should retry the buy).
+        """
+        rotation_min_delta = 0.20
+        if not self.portfolio.positions:
+            return False
+
+        weakest_sym = min(
+            self.portfolio.positions,
+            key=lambda s: abs(self._current_scores.get(s, 0.0)),
+        )
+        weakest_score = abs(self._current_scores.get(weakest_sym, 0.0))
+
+        if abs(new_score) - weakest_score < rotation_min_delta:
+            return False
+
+        pos = self.portfolio.positions[weakest_sym]
+        price = prices.get(weakest_sym, 0.0)
+        if price <= 0:
+            return False
+
+        position_usd = pos["amount"] * price
+        logger.info(
+            "ROTATION: closing %s (score=%.3f) for %s (score=%.3f, delta=%.3f)",
+            weakest_sym, weakest_score, new_symbol, abs(new_score),
+            abs(new_score) - weakest_score,
+        )
+        self._execute_sell(weakest_sym, position_usd, price,
+                           f"rotation — replaced by {new_symbol}", prices=prices)
+        return True
 
     def _execute_sell(self, symbol: str, position_usd: float, price: float, reason: str, prices: dict | None = None) -> None:
         """Execute a sell order, record the trade, and reset tracking state."""

@@ -29,7 +29,8 @@ class AggressiveStrategy(Strategy):
 
         # --- Buy logic: aggressive acts on first signal (no persistence for initial entry) ---
         if combined >= self.buy_threshold:
-            base_amount = capital * self.risk.max_position_pct
+            conviction_mult = self.risk.conviction_size_multiplier if abs(combined) >= 0.50 else 1.0
+            base_amount = capital * self.risk.max_position_pct * conviction_mult
 
             if position == 0.0:
                 if not technical.trend_bullish:

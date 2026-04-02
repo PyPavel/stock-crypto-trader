@@ -43,6 +43,16 @@ risk:
   use_atr_stops: true
   atr_stop_multiplier: 2.5
   atr_trail_multiplier: 4.0
+  take_profit_pct: 0.20
+  partial_tp_trigger_pct: 0.10
+  partial_take_profit_pct: 0.50
+  min_cash_reserve_pct: 0.10
+  conviction_size_multiplier: 1.25
+  max_correlated_positions: 2
+  correlation_groups:
+    eth_ecosystem: [ETH, UNI, POL, LINK]
+    layer1: [SOL, AVAX, DOT, NEAR, HBAR]
+    meme: [SHIB, DOGE]
 strategy: aggressive
 ml:
   enabled: false

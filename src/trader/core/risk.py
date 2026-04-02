@@ -83,8 +83,15 @@ class RiskManager:
         if not corr_result["allowed"]:
             return corr_result
 
-        # Check position size
-        max_usd = capital * self.risk.max_position_pct
+        # Check minimum cash reserve
+        if self.risk.min_cash_reserve_pct > 0 and starting_capital and starting_capital > 0:
+            reserve_floor = starting_capital * self.risk.min_cash_reserve_pct
+            if capital - usd_amount < reserve_floor:
+                return {"allowed": False,
+                        "reason": f"buy of ${usd_amount:.2f} would breach cash reserve floor ${reserve_floor:.2f}"}
+
+        # Check position size (conviction multiplier allows high-signal positions to exceed base pct)
+        max_usd = capital * self.risk.max_position_pct * self.risk.conviction_size_multiplier
         if usd_amount > max_usd:
             return {"allowed": False,
                     "reason": f"position size ${usd_amount:.2f} exceeds max ${max_usd:.2f}"}
