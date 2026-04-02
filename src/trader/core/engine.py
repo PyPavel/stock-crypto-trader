@@ -77,6 +77,10 @@ class TradingEngine:
 
         # Determine candidate symbols
         if self._universe is not None and self.config.universe.enabled:
+            # Retry refresh if universe is still empty (e.g. started outside market hours)
+            if not self._universe._universe:
+                logger.info("Universe empty — retrying refresh")
+                self._universe.refresh_universe()
             candidates = self._universe.get_candidates()
         else:
             candidates = self.config.pairs
