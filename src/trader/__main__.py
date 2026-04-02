@@ -40,6 +40,9 @@ def main():
 
     from trader.collectors.discord import DiscordCollector
 
+    from trader.collectors.stocktwits import StockTwitsCollector
+    from trader.collectors.macro import MacroCollector
+
     if cfg.exchange == "alpaca":
         from trader.adapters.alpaca import AlpacaAdapter
         from trader.collectors.stock_news import StockNewsCollector
@@ -47,6 +50,7 @@ def main():
         from trader.collectors.polymarket import PolymarketCollector
         from trader.collectors.unusual_whales import UnusualWhalesCollector
         from trader.collectors.google_trends import GoogleTrendsCollector
+        from trader.collectors.earnings import EarningsCollector
 
         adapter = AlpacaAdapter(
             api_key=cfg.alpaca.api_key,
@@ -55,6 +59,7 @@ def main():
         )
         collectors = [
             StockNewsCollector(),
+            StockTwitsCollector(),       # Social sentiment, bull/bear ratio + message texts
         ]
         if cfg.discord.bot_token and cfg.discord.stock_channels:
             collectors.append(DiscordCollector(
@@ -66,9 +71,11 @@ def main():
             ))
             logger.info("Discord collector enabled for stocks (%d channels)", len(cfg.discord.stock_channels))
         numeric_collectors = [
-            MarketSentimentCollector(),  # VIX-based contrarian signal for equities
-            PolymarketCollector(),       # Prediction market crowd sentiment
-            UnusualWhalesCollector(),    # Options flow: call/put ratio signal
+            MarketSentimentCollector(),              # VIX-based contrarian signal for equities
+            MacroCollector(asset_class="stock"),     # DXY, VIX level, 10Y yield regime signal
+            EarningsCollector(),                     # Pre/post earnings anticipation + dip buying
+            PolymarketCollector(),                   # Prediction market crowd sentiment
+            UnusualWhalesCollector(),                # Options flow: call/put ratio signal
             GoogleTrendsCollector(asset_class="stock"),  # Search interest trend signal
         ]
     else:
@@ -86,7 +93,8 @@ def main():
         collectors = [
             RedditCollector(client_id=cfg.reddit.client_id, client_secret=cfg.reddit.client_secret,
                             user_agent=cfg.reddit.user_agent),
-            RSSCollector(),  # 8 free feeds: CoinDesk, CoinTelegraph, Decrypt, Bitcoin Magazine, and more
+            RSSCollector(),              # Free feeds: CoinDesk, CoinTelegraph, Decrypt, etc.
+            StockTwitsCollector(),       # Crypto social sentiment (BTC.X, ETH.X format)
         ]
         if cfg.discord.bot_token and cfg.discord.crypto_channels:
             collectors.append(DiscordCollector(
@@ -98,11 +106,12 @@ def main():
             ))
             logger.info("Discord collector enabled for crypto (%d channels)", len(cfg.discord.crypto_channels))
         numeric_collectors = [
-            FearGreedCollector(),        # Crypto Fear & Greed Index
-            CoinGeckoCollector(),        # Global market cap change
-            PolymarketCollector(),       # Prediction market crowd sentiment
-            FundingRateCollector(),      # Binance perpetual futures funding rates
-            GoogleTrendsCollector(),     # Search interest trend signal (crypto)
+            FearGreedCollector(),                    # Crypto Fear & Greed Index
+            CoinGeckoCollector(),                    # Global mcap change + BTC dominance signal
+            MacroCollector(asset_class="crypto"),    # DXY inverse correlation + VIX regime
+            PolymarketCollector(),                   # Prediction market crowd sentiment
+            FundingRateCollector(),                  # Perpetual futures funding rates
+            GoogleTrendsCollector(),                 # Search interest trend signal (crypto)
         ]
 
     from trader.core.universe import SymbolUniverse
