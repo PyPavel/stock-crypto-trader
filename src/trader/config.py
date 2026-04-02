@@ -37,6 +37,15 @@ class CryptoPanicConfig:
 
 
 @dataclass
+class DiscordConfig:
+    bot_token: str = ""
+    crypto_channels: list = field(default_factory=list)  # channel IDs for crypto bot
+    stock_channels: list = field(default_factory=list)   # channel IDs for stocks bot
+    limit: int = 50           # messages per channel per fetch
+    cache_seconds: int = 300  # re-fetch interval (matches cycle_interval)
+
+
+@dataclass
 class MLConfig:
     enabled: bool = False
     model_path: str = "models/signal_scorer.lgb"
@@ -108,6 +117,7 @@ class Config:
     alpaca: AlpacaConfig = field(default_factory=AlpacaConfig)
     reddit: RedditConfig = field(default_factory=RedditConfig)
     cryptopanic: CryptoPanicConfig = field(default_factory=CryptoPanicConfig)
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
     llm_advisor: LLMAdvisorConfig = field(default_factory=LLMAdvisorConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     ml: MLConfig = field(default_factory=MLConfig)
@@ -150,6 +160,7 @@ def load_config(path: str) -> Config:
         ("alpaca", AlpacaConfig),
         ("reddit", RedditConfig),
         ("cryptopanic", CryptoPanicConfig),
+        ("discord", DiscordConfig),
         ("llm_advisor", LLMAdvisorConfig),
         ("risk", RiskConfig),
         ("ml", MLConfig),
@@ -183,5 +194,7 @@ def load_config(path: str) -> Config:
         cfg.telegram.bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     if os.environ.get("TELEGRAM_CHAT_ID"):
         cfg.telegram.chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    if os.environ.get("DISCORD_BOT_TOKEN"):
+        cfg.discord.bot_token = os.environ["DISCORD_BOT_TOKEN"]
 
     return cfg

@@ -38,6 +38,8 @@ def main():
 
     sentiment = SentimentAnalyzer(model=cfg.mimo.model, api_key=cfg.mimo.api_key)
 
+    from trader.collectors.discord import DiscordCollector
+
     if cfg.exchange == "alpaca":
         from trader.adapters.alpaca import AlpacaAdapter
         from trader.collectors.stock_news import StockNewsCollector
@@ -54,8 +56,17 @@ def main():
         collectors = [
             StockNewsCollector(),
         ]
+        if cfg.discord.bot_token and cfg.discord.stock_channels:
+            collectors.append(DiscordCollector(
+                bot_token=cfg.discord.bot_token,
+                channel_ids=cfg.discord.stock_channels,
+                asset_class="stock",
+                limit=cfg.discord.limit,
+                cache_seconds=cfg.discord.cache_seconds,
+            ))
+            logger.info("Discord collector enabled for stocks (%d channels)", len(cfg.discord.stock_channels))
         numeric_collectors = [
-            MarketSentimentCollector(),  # Fear & Greed for equities
+            MarketSentimentCollector(),  # VIX-based contrarian signal for equities
             PolymarketCollector(),       # Prediction market crowd sentiment
             UnusualWhalesCollector(),    # Options flow: call/put ratio signal
             GoogleTrendsCollector(asset_class="stock"),  # Search interest trend signal
@@ -77,6 +88,15 @@ def main():
                             user_agent=cfg.reddit.user_agent),
             RSSCollector(),  # 8 free feeds: CoinDesk, CoinTelegraph, Decrypt, Bitcoin Magazine, and more
         ]
+        if cfg.discord.bot_token and cfg.discord.crypto_channels:
+            collectors.append(DiscordCollector(
+                bot_token=cfg.discord.bot_token,
+                channel_ids=cfg.discord.crypto_channels,
+                asset_class="crypto",
+                limit=cfg.discord.limit,
+                cache_seconds=cfg.discord.cache_seconds,
+            ))
+            logger.info("Discord collector enabled for crypto (%d channels)", len(cfg.discord.crypto_channels))
         numeric_collectors = [
             FearGreedCollector(),        # Crypto Fear & Greed Index
             CoinGeckoCollector(),        # Global market cap change

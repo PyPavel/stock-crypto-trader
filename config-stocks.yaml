@@ -36,6 +36,12 @@ reddit:
   client_id: ''
   client_secret: ''
   user_agent: trader-bot/1.0
+discord:
+  bot_token: ''
+  crypto_channels: []
+  stock_channels: []    # e.g. ['987654321098765432']
+  limit: 50
+  cache_seconds: 300
 risk:
   max_drawdown_pct: 0.15
   max_open_positions: 5
