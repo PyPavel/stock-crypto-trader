@@ -306,7 +306,7 @@ class TradingEngine:
         else:
             self._peak_prices.pop(symbol, None)
 
-        # 4b. Stop-loss and take-profit checks — fire regardless of buy eligibility
+        # 4b. Protective exits — fire regardless of cooldown (stop-loss, trailing, loss-limit, full TP)
         if position_usd > 0 and symbol in self.portfolio.positions:
             entry = self.portfolio.positions[symbol]["entry_price"]
 
@@ -343,23 +343,26 @@ class TradingEngine:
                 self._execute_sell(symbol, position_usd, price, "take-profit triggered", prices=prices)
                 return
 
-            if self._risk.check_partial_take_profit(entry, price):
-                partial_usd = self._risk.partial_sell_amount(position_usd)
-                if partial_usd > 0:
-                    logger.warning(
-                        "Partial take-profit triggered for %s: entry=%.2f, current=%.2f, selling $%.2f",
-                        symbol, entry, price, partial_usd,
-                    )
-                    self._execute_sell(symbol, partial_usd, price, "partial-take-profit triggered", prices=prices)
-                    return
-
-        # 4c. Cooldown check
+        # 4c. Cooldown check (partial TP also respects cooldown — prevents cascade halving)
         if self._in_cooldown(symbol):
             remaining = self.config.risk.cooldown_minutes - (
                 (datetime.now(timezone.utc) - self._last_trade_time[symbol]).total_seconds() / 60
             )
             logger.info("COOLDOWN %s: %.0fm remaining, skipping", symbol, remaining)
             return
+
+        # 4d. Partial take-profit — after cooldown so it only fires once per cooldown window
+        if position_usd > 0 and symbol in self.portfolio.positions:
+            entry = self.portfolio.positions[symbol]["entry_price"]
+            if self._risk.check_partial_take_profit(entry, price):
+                partial_usd = self._risk.partial_sell_amount(position_usd)
+                if partial_usd > 0:
+                    logger.warning(
+                        "Partial take-profit triggered for %s: entry=%.4f, current=%.4f, selling $%.2f",
+                        symbol, entry, price, partial_usd,
+                    )
+                    self._execute_sell(symbol, partial_usd, price, "partial-take-profit triggered", prices=prices)
+                    return
 
         # 5. Strategy decision
         decision = self._strategy.decide(
