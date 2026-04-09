@@ -82,7 +82,11 @@ class AlpacaAdapter(ExchangeAdapter):
         if interval == "1d":
             start = now - timedelta(days=limit + 10)
         elif interval == "1h":
-            start = now - timedelta(hours=limit + 10)
+            # IEX only has data during market hours (~6.5h/day, no weekends).
+            # timedelta(hours=limit+10) only covers ~4.6 calendar days -> ~20 bars,
+            # below MIN_CANDLES=35. Use calendar-day lookback instead.
+            calendar_days = limit // 3 + 14  # generous buffer for weekends/holidays
+            start = now - timedelta(days=calendar_days)
         elif interval == "5m":
             start = now - timedelta(minutes=5 * (limit + 10))
         else:
@@ -93,11 +97,10 @@ class AlpacaAdapter(ExchangeAdapter):
             timeframe=timeframe,
             start=start,
             end=now,
-            limit=limit,
             feed=DataFeed.IEX,  # free tier — IEX feed only
         )
         bars = self._data.get_stock_bars(request)
-        raw = bars[symbol] if symbol in bars else []
+        raw = bars.data.get(symbol, []) if hasattr(bars, "data") else []  # BarSet.__contains__ is broken
 
         return [
             Candle(
