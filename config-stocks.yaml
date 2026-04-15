@@ -14,7 +14,7 @@ mimo:
   model: mimo-v2-flash
   api_key: ''
 ml:
-  enabled: true
+  enabled: false
   model_path: models/stocks.lgbm
 universe:
   enabled: true

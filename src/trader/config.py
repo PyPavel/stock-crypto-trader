@@ -102,6 +102,8 @@ class RiskConfig:
     min_cash_reserve_pct: float = 0.0     # always keep this fraction of starting capital as cash
     # Conviction sizing — allow high-conviction positions to exceed max_position_pct
     conviction_size_multiplier: float = 1.0  # e.g. 1.25 lets strong signals use 25% more capital
+    # Minimum position size — skip dust orders below this USD amount
+    min_position_usd: float = 50.0
 
 
 @dataclass

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from trader.config import Config
 from trader.adapters.base import ExchangeAdapter
 from trader.llm.sentiment import SentimentAnalyzer
+from trader.llm.advisor import LLMAdvisor
 from trader.notifications.telegram import TelegramNotifier
 from trader.core.signals import SignalGenerator
 from trader.core.risk import RiskManager
@@ -25,6 +26,7 @@ class TradingEngine:
         adapter: ExchangeAdapter,
         sentiment_analyzer: SentimentAnalyzer,
         collectors: list,
+        advisor: LLMAdvisor | None = None,
         numeric_collectors: list | None = None,
         db_path: str = "trader.db",
         notifier=None,
@@ -33,6 +35,7 @@ class TradingEngine:
         self.config = config
         self._adapter = adapter
         self._sentiment = sentiment_analyzer
+        self._advisor = advisor
         self._collectors = collectors
         self._numeric_collectors = numeric_collectors or []
         self._notifier: TelegramNotifier | None = notifier
@@ -490,6 +493,28 @@ class TradingEngine:
             capital=self.portfolio.cash,
             position=position_usd,
         )
+
+        # 5b. LLM Advisor Confirmation / Boosting
+        if decision["action"] == "buy" and self._advisor:
+            trend = "bullish" if result.get("trend_bullish") else "bearish"
+            advise = self._advisor.advise(
+                symbol=symbol,
+                tech_score=result.get("tech_score", 0.0),
+                trend=trend,
+                sentiment=result.get("raw_sentiment", 0.0),
+                headlines=result.get("texts", [])
+            )
+            if advise["judgment"] == "avoid":
+                logger.info("LLM Advisor VETO for %s: %s", symbol, advise.get("reason"))
+                decision["action"] = "hold"
+                decision["reason"] = f"LLM Advisor veto: {advise.get('reason')}"
+            elif advise["judgment"] == "buy" and advise.get("conviction", 0) >= 0.8:
+                multiplier = self.config.risk.conviction_size_multiplier
+                if multiplier > 1.0:
+                    logger.info("LLM Advisor BOOST for %s: conviction=%.2f, multiplier=%.2f",
+                                symbol, advise["conviction"], multiplier)
+                    decision["usd_amount"] *= multiplier
+                    decision["reason"] += f" (LLM High Conviction Boost x{multiplier})"
 
         # Block new buys if symbol didn't rank in top active_pairs
         if decision["action"] == "buy" and not can_buy:

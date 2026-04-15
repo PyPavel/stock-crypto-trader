@@ -2,8 +2,8 @@ from trader.strategies.base import Strategy
 from trader.models import Signal, SentimentScore
 from trader.config import RiskConfig
 
-BUY_THRESHOLD = 0.35
-SELL_THRESHOLD = -0.35
+BUY_THRESHOLD = 0.25
+SELL_THRESHOLD = -0.25
 TECH_WEIGHT = 0.70
 SENTIMENT_WEIGHT = 0.30
 PERSISTENCE_MIN = 2

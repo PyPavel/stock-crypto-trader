@@ -38,6 +38,17 @@ def main():
 
     sentiment = SentimentAnalyzer(model=cfg.mimo.model, api_key=cfg.mimo.api_key)
 
+    from trader.llm.advisor import LLMAdvisor
+    advisor = None
+    if cfg.llm_advisor.enabled:
+        advisor = LLMAdvisor(
+            provider=cfg.llm_advisor.provider,
+            api_key=cfg.llm_advisor.api_key,
+        )
+        logger.info("LLM Advisor enabled (provider=%s)", cfg.llm_advisor.provider)
+    else:
+        logger.info("LLM Advisor disabled")
+
     from trader.collectors.discord import DiscordCollector
 
     from trader.collectors.stocktwits import StockTwitsCollector
@@ -130,6 +141,7 @@ def main():
         universe.refresh_universe()
 
     engine = TradingEngine(config=cfg, adapter=adapter, sentiment_analyzer=sentiment,
+                           advisor=advisor,
                            collectors=collectors, numeric_collectors=numeric_collectors,
                            db_path=args.db, notifier=notifier, universe=universe)
 
