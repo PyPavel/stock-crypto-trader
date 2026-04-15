@@ -357,11 +357,17 @@ class TradingEngine:
                                      rsi=tech_signal.rsi)
             else:
                 active_score = tech_score
-            # Use same weights as strategy for consistent ranking/logging
+            # Calculate weights
             strat = self._strategy
             tw = getattr(strat, "tech_weight", 0.7)
             sw = getattr(strat, "sentiment_weight", 0.3)
-            combined_score = active_score * tw + raw_sentiment * sw
+
+            # If no sentiment texts were found, use the active_score directly 
+            # instead of penalizing it with the 0.7 multiplier (tw)
+            if not texts:
+                combined_score = active_score
+            else:
+                combined_score = active_score * tw + raw_sentiment * sw
 
             if ml_score is not None:
                 logger.info(
@@ -543,6 +549,11 @@ class TradingEngine:
                 logger.debug("Final buy amount is zero, skipping")
                 return
 
+            min_pos = getattr(self.config.risk, "min_position_usd", 50.0)
+            if final_usd < min_pos:
+                logger.info("BUY skipped %s: $%.2f below minimum $%.0f", symbol, final_usd, min_pos)
+                return
+
             order = self._router.execute("buy", symbol, final_usd, price=price)
             fee = order.amount * order.price * 0.001
             trade = Trade(order_id=order.id, symbol=symbol, side="buy",
@@ -565,7 +576,7 @@ class TradingEngine:
         Close the weakest open position to make room for a stronger signal.
         Returns True if a position was closed (caller should retry the buy).
         """
-        rotation_min_delta = 0.20
+        rotation_min_delta = 0.10
         if not self.portfolio.positions:
             return False
 
