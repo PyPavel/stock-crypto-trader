@@ -9,6 +9,7 @@ SENTIMENT_WEIGHT = 0.30
 PERSISTENCE_MIN = 2
 SCALE_IN_PCT = 0.50
 MIN_SIGNAL_FOR_SCALE = 0.50
+RSI_OVERSOLD = 35  # Allow buys in bearish trend when RSI is this low (reversal play)
 
 
 class ModerateStrategy(Strategy):
@@ -30,12 +31,14 @@ class ModerateStrategy(Strategy):
 
         # --- Buy logic ---
         if combined >= self.buy_threshold:
-            # Trend filter: block buys in a bearish trend
-            if not technical.trend_bullish:
+            # Trend filter: block buys in bearish trend UNLESS RSI signals oversold reversal
+            rsi = getattr(technical, "rsi", None)
+            oversold_reversal = rsi is not None and rsi <= RSI_OVERSOLD
+            if not technical.trend_bullish and not oversold_reversal:
                 return {
                     "action": "hold",
                     "usd_amount": 0.0,
-                    "reason": f"trend filter blocked buy (bearish trend), score={combined:.2f}",
+                    "reason": f"trend filter blocked buy (bearish trend, RSI={rsi:.0f}), score={combined:.2f}",
                 }
 
             # New position: require signal persistence

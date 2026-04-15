@@ -70,7 +70,10 @@ class UnusualWhalesCollector:
             call_volume = 0
             put_volume = 0
             for contract in options:
-                option_type = (contract.get("option") or "").upper()
+                # Option code format: SYMBOL + 6-digit date (YYMMDD) + C/P + 8-digit strike
+                # e.g. "AAPL260415C00175000" → type is at position [-9]
+                option_code = (contract.get("option") or "").upper()
+                option_type = option_code[-9] if len(option_code) >= 9 else ""
                 volume = int(contract.get("volume") or 0)
                 if option_type == "C":
                     call_volume += volume

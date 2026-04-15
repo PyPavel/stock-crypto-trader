@@ -36,6 +36,3 @@ Thumbs.db
 *.sqlite3
 data/training/coinbase/
 data/training/alpaca/
-
-# Internal planning docs
-docs/superpowers/

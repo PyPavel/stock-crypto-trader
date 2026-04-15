@@ -113,7 +113,7 @@ class SignalGenerator:
           trend_bullish: bool (True if price > 50 EMA)
         """
         if len(candles) < MIN_CANDLES:
-            return {"score": 0.0, "trend_bullish": True}
+            return {"score": 0.0, "trend_bullish": True, "rsi": None}
 
         df = pd.DataFrame([
             {"close": c.close, "high": c.high, "low": c.low, "volume": c.volume}
@@ -125,6 +125,7 @@ class SignalGenerator:
         high = df["high"]
         low = df["low"]
         volume = df["volume"]
+        latest_rsi: float | None = None
 
         # --- RSI signal (weight: 0.20) ---
         try:
@@ -136,6 +137,7 @@ class SignalGenerator:
             if rsi_series is not None and not rsi_series.empty:
                 rsi = rsi_series.iloc[-1]
                 if pd.notna(rsi):
+                    latest_rsi = float(rsi)
                     if rsi < 30:
                         scores.append((70 - rsi) / 40 * 0.20)
                     elif rsi > 70:
@@ -312,10 +314,11 @@ class SignalGenerator:
             logger.debug("Stochastic calculation failed", exc_info=True)
 
         if not scores:
-            return {"score": 0.0, "trend_bullish": True}
+            return {"score": 0.0, "trend_bullish": True, "rsi": latest_rsi}
 
         total = sum(scores)
         return {
             "score": max(-1.0, min(1.0, total)),
             "trend_bullish": trend_bullish,
+            "rsi": latest_rsi,
         }

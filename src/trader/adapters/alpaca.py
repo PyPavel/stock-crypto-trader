@@ -135,22 +135,41 @@ class AlpacaAdapter(ExchangeAdapter):
         }
 
     def place_order(self, side: str, symbol: str, amount: float) -> Order:
+        """Place a market order. `amount` is in shares (from router)."""
+        import time
         alpaca_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
 
-        # amount is USD notional — use notional field for market orders
+        # Convert shares to USD notional for fractional-share market orders
+        price_est = self.get_price(symbol)
+        notional_usd = round(amount * price_est, 2) if price_est > 0 else round(amount, 2)
+        if notional_usd < 1.0:
+            raise ValueError(f"Order notional ${notional_usd:.2f} too small for {symbol}")
+
         request = MarketOrderRequest(
             symbol=symbol,
-            notional=round(amount, 2),
+            notional=notional_usd,
             side=alpaca_side,
             time_in_force=TimeInForce.DAY,
         )
         raw = self._trading.submit_order(request)
 
-        filled_price = float(raw.filled_avg_price) if raw.filled_avg_price else 0.0
-        filled_qty = float(raw.filled_qty) if raw.filled_qty else (amount / filled_price if filled_price else 0.0)
+        # Poll for fill — Alpaca market orders may not fill instantly
+        order_id = str(raw.id)
+        for _ in range(6):  # up to 3 seconds
+            if raw.filled_avg_price and float(raw.filled_avg_price) > 0:
+                break
+            time.sleep(0.5)
+            raw = self._trading.get_order_by_id(order_id)
+
+        filled_price = float(raw.filled_avg_price) if raw.filled_avg_price else price_est
+        filled_qty = float(raw.filled_qty) if raw.filled_qty else (notional_usd / filled_price if filled_price else 0.0)
+
+        if filled_qty <= 0:
+            logger.warning("Order %s for %s not filled after polling, using estimate", order_id, symbol)
+            filled_qty = notional_usd / filled_price if filled_price > 0 else 0.0
 
         return Order(
-            id=str(raw.id),
+            id=order_id,
             symbol=symbol,
             side=side,
             amount=filled_qty,

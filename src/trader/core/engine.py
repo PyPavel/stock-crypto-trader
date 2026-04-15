@@ -54,8 +54,14 @@ class TradingEngine:
         # Cooldown: track last trade timestamp per symbol
         self._last_trade_time: dict[str, datetime] = {}
 
+        # Partial TP: track symbols that already took partial profit (reset on full exit)
+        self._partial_tp_taken: set[str] = set()
+
         # Cycle counter for periodic Telegram summaries
         self._cycle_count: int = 0
+
+        # Dedup signal alerts: track last texts hash per symbol to avoid re-sending identical news
+        self._last_alert_hash: dict[str, int] = {}
 
         # Current cycle scores — used for position rotation decisions
         self._current_scores: dict[str, float] = {}
@@ -204,6 +210,12 @@ class TradingEngine:
         # Sort by abs(score) descending, cap at MAX_ALERTS
         alerts.sort(key=lambda x: abs(x[2]), reverse=True)
         for sym, r, combo in alerts[:MAX_ALERTS]:
+            texts = r.get("texts", [])
+            texts_hash = hash(tuple(texts[:3]))
+            if self._last_alert_hash.get(sym) == texts_hash:
+                continue
+            self._last_alert_hash[sym] = texts_hash
+
             tech = r.get("tech_score", 0.0)
             sent = r.get("raw_sentiment", 0.0)
             trend = "bull" if r.get("trend_bullish") else "bear"
@@ -221,7 +233,6 @@ class TradingEngine:
                 lines.append(f"tech={tech:+.2f} sent={sent:+.2f}")
             lines.append(f"Position: {'OPEN' if in_position else 'none'}")
 
-            texts = r.get("texts", [])
             for t in texts[:3]:
                 snippet = t[:140].replace("\n", " ")
                 lines.append(f"  >> {snippet}")
@@ -273,16 +284,28 @@ class TradingEngine:
             price = self._adapter.get_price(symbol)
             prices[symbol] = price
 
-            # 2. Sentiment — collect, deduplicate, score
-            texts: list[str] = []
-            for collector in self._collectors:
-                try:
-                    texts.extend(collector.fetch(symbols=[symbol]))
-                except Exception as e:
-                    logger.warning("Collector failed: %s", e)
-            texts = list(dict.fromkeys(texts))
+            # 2. Technical signals first — cheap, used to gate expensive LLM calls
+            sig_result = self._signals.score_with_trend(candles)
+            tech_score = sig_result["score"]
+            trend_bullish = sig_result["trend_bullish"]
+            rsi_value = sig_result.get("rsi")
 
-            raw_sentiment = self._sentiment.score_texts(texts)
+            # 3. Sentiment — skip LLM for non-held symbols with deeply negative tech score.
+            # Even with perfect sentiment (1.0), combined = tech*0.6 + sent*0.4 can't reach
+            # the buy threshold (0.35) when tech < -0.15, so the LLM call would be wasted.
+            has_position = symbol in self.portfolio.positions
+            skip_llm = not has_position and tech_score < -0.15
+
+            texts: list[str] = []
+            if not skip_llm:
+                for collector in self._collectors:
+                    try:
+                        texts.extend(collector.fetch(symbols=[symbol]))
+                    except Exception as e:
+                        logger.warning("Collector failed: %s", e)
+                texts = list(dict.fromkeys(texts))
+
+            raw_sentiment = self._sentiment.score_texts(texts) if not skip_llm else 0.0
 
             # Blend in numeric signals (Fear & Greed, CoinGecko, etc.)
             numeric_scores = []
@@ -309,16 +332,12 @@ class TradingEngine:
 
             sentiment = SentimentScore(symbol=symbol, score=raw_sentiment,
                                        source="combined", items_analyzed=len(texts))
-
-            # 3. Technical signals
-            sig_result = self._signals.score_with_trend(candles)
-            tech_score = sig_result["score"]
-            trend_bullish = sig_result["trend_bullish"]
             tech_signal = Signal(
                 symbol=symbol,
                 score=tech_score,
                 reason="technical indicators",
                 trend_bullish=trend_bullish,
+                rsi=rsi_value,
             )
 
             # 3b. ML score — blend with tech rather than override
@@ -334,10 +353,15 @@ class TradingEngine:
                 active_score = ml_score * 0.7 + tech_score * 0.3
                 tech_signal = Signal(symbol=symbol, score=active_score,
                                      reason="ml+tech blend",
-                                     trend_bullish=tech_signal.trend_bullish)
+                                     trend_bullish=tech_signal.trend_bullish,
+                                     rsi=tech_signal.rsi)
             else:
                 active_score = tech_score
-            combined_score = active_score * 0.6 + raw_sentiment * 0.4
+            # Use same weights as strategy for consistent ranking/logging
+            strat = self._strategy
+            tw = getattr(strat, "tech_weight", 0.7)
+            sw = getattr(strat, "sentiment_weight", 0.3)
+            combined_score = active_score * tw + raw_sentiment * sw
 
             if ml_score is not None:
                 logger.info(
@@ -438,8 +462,8 @@ class TradingEngine:
             logger.info("COOLDOWN %s: %.0fm remaining, skipping", symbol, remaining)
             return
 
-        # 4d. Partial take-profit — after cooldown so it only fires once per cooldown window
-        if position_usd > 0 and symbol in self.portfolio.positions:
+        # 4d. Partial take-profit — fires once per position (not per cooldown window)
+        if position_usd > 0 and symbol in self.portfolio.positions and symbol not in self._partial_tp_taken:
             entry = self.portfolio.positions[symbol]["entry_price"]
             if self._risk.check_partial_take_profit(entry, price):
                 partial_usd = self._risk.partial_sell_amount(position_usd)
@@ -448,6 +472,7 @@ class TradingEngine:
                         "Partial take-profit triggered for %s: entry=%.4f, current=%.4f, selling $%.2f",
                         symbol, entry, price, partial_usd,
                     )
+                    self._partial_tp_taken.add(symbol)
                     self._execute_sell(symbol, partial_usd, price, "partial-take-profit triggered", prices=prices, result=result)
                     return
 
@@ -559,6 +584,11 @@ class TradingEngine:
             return False
 
         position_usd = pos["amount"] * price
+        if position_usd < 1.0:
+            # Ghost position (zero/dust amount) — clean it up instead of selling
+            logger.warning("Removing ghost position %s (value=$%.4f)", weakest_sym, position_usd)
+            del self.portfolio.positions[weakest_sym]
+            return True
         logger.info(
             "ROTATION: closing %s (score=%.3f) for %s (score=%.3f, delta=%.3f)",
             weakest_sym, weakest_score, new_symbol, abs(new_score),
@@ -581,5 +611,6 @@ class TradingEngine:
         self._record_trade_time(symbol)
         if not is_partial:
             self._peak_prices.pop(symbol, None)
+            self._partial_tp_taken.discard(symbol)
         logger.info("SELL %s: %.6f @ %.2f (%s)", symbol, order.amount, order.price, reason)
         self._notify("sell", symbol, order.amount, order.price, reason, prices=prices, result=result)

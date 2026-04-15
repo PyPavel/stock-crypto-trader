@@ -21,6 +21,7 @@ class Signal:
     score: float        # -1.0 (strong sell) to +1.0 (strong buy)
     reason: str
     trend_bullish: bool = True   # True if price is above 50-period EMA (bullish trend)
+    rsi: float | None = None     # Latest RSI value (0-100), used for oversold reversal filter
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
