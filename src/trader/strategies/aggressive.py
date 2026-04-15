@@ -1,6 +1,6 @@
 from trader.strategies.base import Strategy
 
-BUY_THRESHOLD = 0.20
+BUY_THRESHOLD = 0.25
 SELL_THRESHOLD = -0.10
 TECH_WEIGHT = 0.55
 SENTIMENT_WEIGHT = 0.45
