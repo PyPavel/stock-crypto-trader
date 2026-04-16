@@ -43,9 +43,10 @@ def main():
     if cfg.llm_advisor.enabled:
         advisor = LLMAdvisor(
             provider=cfg.llm_advisor.provider,
-            api_key=cfg.llm_advisor.api_key,
+            api_key=cfg.llm_advisor.api_key or cfg.mimo.api_key,
+            model=cfg.mimo.model
         )
-        logger.info("LLM Advisor enabled (provider=%s)", cfg.llm_advisor.provider)
+        logger.info("LLM Advisor enabled (provider=%s, model=%s)", cfg.llm_advisor.provider, cfg.mimo.model)
     else:
         logger.info("LLM Advisor disabled")
 

@@ -5,9 +5,9 @@ coinbase:
 cycle_interval: 300
 exchange: coinbase
 llm_advisor:
-  api_key: ''
-  enabled: false
-  provider: claude
+  api_key: '' # Will use MIMO_API_KEY as fallback
+  enabled: true
+  provider: claude # This maps to Sonnet on Mimo
 mode: paper
 mimo:
   model: mimo-v2-flash
@@ -59,7 +59,7 @@ risk:
     eth_ecosystem: [ETH, UNI, POL, LINK]
     layer1: [SOL, AVAX, DOT, NEAR, HBAR]
     meme: [SHIB, DOGE]
-strategy: aggressive
+strategy: moderate
 ml:
   enabled: false
   model_path: models/crypto.lgbm

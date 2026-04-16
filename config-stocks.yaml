@@ -7,9 +7,9 @@ cycle_interval: 300
 exchange: alpaca
 llm_advisor:
   api_key: ''
-  enabled: false
+  enabled: true
   provider: claude
-mode: paper
+mode: live
 mimo:
   model: mimo-v2-flash
   api_key: ''
@@ -59,4 +59,4 @@ risk:
   correlation_groups:
     mega_tech: [AAPL, MSFT, GOOGL, AMZN, META, NVDA]
     fintech: [JPM, V, MA]
-strategy: aggressive
+strategy: moderate
