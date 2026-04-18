@@ -9,11 +9,23 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.enums import DataFeed
+from alpaca.common.exceptions import APIError
 
 from trader.adapters.base import ExchangeAdapter
 from trader.models import Candle, Order
 
 logger = logging.getLogger(__name__)
+
+
+# Alpaca error code for Pattern Day Trader protection
+PDT_ERROR_CODE = 40310100
+
+
+class PDTRejectedError(Exception):
+    """Raised when Alpaca rejects an order due to Pattern Day Trader protection."""
+    def __init__(self, symbol: str):
+        self.symbol = symbol
+        super().__init__(f"PDT protection rejected order for {symbol}")
 
 _NYSE_TZ = ZoneInfo("America/New_York")
 
@@ -168,7 +180,19 @@ class AlpacaAdapter(ExchangeAdapter):
                 side=alpaca_side,
                 time_in_force=TimeInForce.DAY,
             )
-        raw = self._trading.submit_order(request)
+        try:
+            raw = self._trading.submit_order(request)
+        except APIError as e:
+            # PDT rejection: Alpaca returns code 40310100. Translate to typed
+            # exception so the engine can mark the symbol PDT-blocked and avoid
+            # hammering the same order every cycle.
+            err = getattr(e, "_error", None)
+            code = None
+            if isinstance(err, dict):
+                code = err.get("code")
+            if code == PDT_ERROR_CODE or str(PDT_ERROR_CODE) in str(e):
+                raise PDTRejectedError(symbol) from e
+            raise
 
         # Poll for fill — Alpaca market orders may not fill instantly
         order_id = str(raw.id)
@@ -179,11 +203,12 @@ class AlpacaAdapter(ExchangeAdapter):
             raw = self._trading.get_order_by_id(order_id)
 
         filled_price = float(raw.filled_avg_price) if raw.filled_avg_price else price_est
-        filled_qty = float(raw.filled_qty) if raw.filled_qty else (notional_usd / filled_price if filled_price else 0.0)
+        notional_est = notional_usd if side == "buy" else (amount * filled_price)
+        filled_qty = float(raw.filled_qty) if raw.filled_qty else (notional_est / filled_price if filled_price else 0.0)
 
         if filled_qty <= 0:
             logger.warning("Order %s for %s not filled after polling, using estimate", order_id, symbol)
-            filled_qty = notional_usd / filled_price if filled_price > 0 else 0.0
+            filled_qty = notional_est / filled_price if filled_price > 0 else 0.0
 
         return Order(
             id=order_id,
