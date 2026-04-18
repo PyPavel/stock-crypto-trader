@@ -192,6 +192,8 @@ def load_config(path: str) -> Config:
         cfg.alpaca.api_key = os.environ["ALPACA_API_KEY"]
     if os.environ.get("ALPACA_API_SECRET"):
         cfg.alpaca.api_secret = os.environ["ALPACA_API_SECRET"]
+    if os.environ.get("ALPACA_PAPER") is not None:
+        cfg.alpaca.paper = os.environ["ALPACA_PAPER"].lower() in ("1", "true", "yes")
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
         cfg.telegram.bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     if os.environ.get("TELEGRAM_CHAT_ID"):

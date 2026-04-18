@@ -139,18 +139,35 @@ class AlpacaAdapter(ExchangeAdapter):
         import time
         alpaca_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
 
-        # Convert shares to USD notional for fractional-share market orders
         price_est = self.get_price(symbol)
-        notional_usd = round(amount * price_est, 2) if price_est > 0 else round(amount, 2)
-        if notional_usd < 1.0:
-            raise ValueError(f"Order notional ${notional_usd:.2f} too small for {symbol}")
 
-        request = MarketOrderRequest(
-            symbol=symbol,
-            notional=notional_usd,
-            side=alpaca_side,
-            time_in_force=TimeInForce.DAY,
-        )
+        if side == "sell":
+            # Use actual position qty from Alpaca to avoid insufficient-qty errors
+            # caused by floating point drift between our portfolio tracking and Alpaca's records
+            try:
+                position = self._trading.get_open_position(symbol)
+                qty = float(position.qty)
+            except Exception:
+                qty = amount
+            if qty <= 0:
+                raise ValueError(f"No position to sell for {symbol}")
+            request = MarketOrderRequest(
+                symbol=symbol,
+                qty=round(qty, 9),
+                side=alpaca_side,
+                time_in_force=TimeInForce.DAY,
+            )
+        else:
+            # Convert shares to USD notional for fractional-share buy orders
+            notional_usd = round(amount * price_est, 2) if price_est > 0 else round(amount, 2)
+            if notional_usd < 1.0:
+                raise ValueError(f"Order notional ${notional_usd:.2f} too small for {symbol}")
+            request = MarketOrderRequest(
+                symbol=symbol,
+                notional=notional_usd,
+                side=alpaca_side,
+                time_in_force=TimeInForce.DAY,
+            )
         raw = self._trading.submit_order(request)
 
         # Poll for fill — Alpaca market orders may not fill instantly
