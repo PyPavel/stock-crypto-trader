@@ -1,41 +1,3 @@
-import sys
-from types import ModuleType
-from unittest.mock import MagicMock
-
-# ---------------------------------------------------------------------------
-# Stub out alpaca packages before any project module is imported.
-# alpaca-py is not installed in the local dev venv (it lives only in Docker).
-# ---------------------------------------------------------------------------
-def _make_alpaca_stubs():
-    for name in [
-        "alpaca",
-        "alpaca.data",
-        "alpaca.data.historical",
-        "alpaca.data.requests",
-        "alpaca.data.timeframe",
-        "alpaca.data.enums",
-    ]:
-        if name not in sys.modules:
-            sys.modules[name] = ModuleType(name)
-
-    # Minimal stand-ins for the symbols the adapter imports
-    sys.modules["alpaca.data.historical"].StockHistoricalDataClient = MagicMock
-    sys.modules["alpaca.data.requests"].StockBarsRequest = MagicMock
-    sys.modules["alpaca.data.requests"].StockLatestQuoteRequest = MagicMock
-
-    tf_mod = sys.modules["alpaca.data.timeframe"]
-    tf_mod.TimeFrameUnit = MagicMock()
-    tf_mod.TimeFrame = MagicMock(side_effect=lambda *a, **kw: MagicMock())
-
-    enum_mod = sys.modules["alpaca.data.enums"]
-    enum_mod.DataFeed = MagicMock()
-
-
-_make_alpaca_stubs()
-
-# ---------------------------------------------------------------------------
-# Now the rest of the test imports are safe
-# ---------------------------------------------------------------------------
 from decimal import Decimal
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -47,6 +9,9 @@ from trader.models import Candle, Order
 
 def make_adapter(paper=True):
     """Build a TastyTradeAdapter with all external clients mocked."""
+    # Python 3.14 patch() uses pkgutil._resolve_name which traverses attributes —
+    # the module must be in sys.modules before the with-patch context is entered.
+    import trader.adapters.tastytrade  # noqa: F401
     with patch("trader.adapters.tastytrade.Session") as mock_session_cls, \
          patch("trader.adapters.tastytrade.Account") as mock_account_cls, \
          patch("trader.adapters.tastytrade.StockHistoricalDataClient") as mock_data_cls:
