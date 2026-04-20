@@ -1,0 +1,35 @@
+# config-tastytrade.yaml.example
+# Copy to config-tastytrade.yaml and fill in credentials.
+# Run: python -m trader --config config-tastytrade.yaml --port 8001 --db tastytrade.db
+
+exchange: tastytrade
+mode: paper
+strategy: moderate
+capital: 5000
+cycle_interval: 300
+
+pairs:
+  - AAPL
+  - TSLA
+  - NVDA
+  - MSFT
+  - GOOGL
+  - AMZN
+  - META
+
+tastytrade:
+  paper: true          # set to false for live trading
+
+alpaca:                # required for market data (free IEX feed)
+  paper: true          # value ignored for data-only use
+
+telegram:
+  bot_token: ""        # set TELEGRAM_BOT_TOKEN env var
+  chat_id: ""          # set TELEGRAM_CHAT_ID env var
+
+risk:
+  max_position_pct: 0.20
+  stop_loss_pct: 0.05
+  max_drawdown_pct: 0.15
+  max_open_positions: 5
+  min_position_usd: 50.0
