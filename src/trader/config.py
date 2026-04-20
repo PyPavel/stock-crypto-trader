@@ -28,7 +28,7 @@ class AlpacaConfig:
 class TastyTradeConfig:
     username: str = ""
     password: str = ""
-    account_number: str = ""
+    account_number: str = ""   # picks first account if empty
     paper: bool = True
 
 
