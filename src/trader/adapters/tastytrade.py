@@ -56,11 +56,20 @@ class TastyTradeAdapter(ExchangeAdapter):
             is_test_env=tastytrade_cfg.paper,
         )
         accounts = Account.get_accounts(self._session)
+        if not accounts:
+            raise RuntimeError("TastyTrade: no accounts returned for this session")
         if tastytrade_cfg.account_number:
             self._account = next(
                 (a for a in accounts if a.account_number == tastytrade_cfg.account_number),
-                accounts[0],
+                None,
             )
+            if self._account is None:
+                logger.warning(
+                    "Account %s not found; falling back to %s",
+                    tastytrade_cfg.account_number,
+                    accounts[0].account_number,
+                )
+                self._account = accounts[0]
         else:
             self._account = accounts[0]
         logger.info("TastyTrade connected to account %s (paper=%s)", self._account.account_number, self._paper)

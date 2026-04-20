@@ -1,8 +1,5 @@
-from decimal import Decimal
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from trader.models import Candle, Order
 
