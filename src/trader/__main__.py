@@ -90,6 +90,41 @@ def main():
             UnusualWhalesCollector(),                # Options flow: call/put ratio signal
             GoogleTrendsCollector(asset_class="stock"),  # Search interest trend signal
         ]
+    elif cfg.exchange == "tastytrade":
+        from trader.adapters.tastytrade import TastyTradeAdapter
+        from trader.collectors.stock_news import StockNewsCollector
+        from trader.collectors.market_sentiment import MarketSentimentCollector
+        from trader.collectors.polymarket import PolymarketCollector
+        from trader.collectors.unusual_whales import UnusualWhalesCollector
+        from trader.collectors.google_trends import GoogleTrendsCollector
+        from trader.collectors.earnings import EarningsCollector
+
+        adapter = TastyTradeAdapter(
+            tastytrade_cfg=cfg.tastytrade,
+            alpaca_data_key=cfg.alpaca.api_key,
+            alpaca_data_secret=cfg.alpaca.api_secret,
+        )
+        collectors = [
+            StockNewsCollector(),
+            StockTwitsCollector(),
+        ]
+        if cfg.discord.bot_token and cfg.discord.stock_channels:
+            collectors.append(DiscordCollector(
+                bot_token=cfg.discord.bot_token,
+                channel_ids=cfg.discord.stock_channels,
+                asset_class="stock",
+                limit=cfg.discord.limit,
+                cache_seconds=cfg.discord.cache_seconds,
+            ))
+            logger.info("Discord collector enabled for stocks (%d channels)", len(cfg.discord.stock_channels))
+        numeric_collectors = [
+            MarketSentimentCollector(),
+            MacroCollector(asset_class="stock"),
+            EarningsCollector(),
+            PolymarketCollector(),
+            UnusualWhalesCollector(),
+            GoogleTrendsCollector(asset_class="stock"),
+        ]
     else:
         # Default: coinbase (existing logic unchanged)
         from trader.adapters.coinbase import CoinbaseAdapter
@@ -135,7 +170,7 @@ def main():
         exchange=cfg.exchange,
         seed_pairs=cfg.pairs,
         universe_config=cfg.universe,
-        alpaca_cfg=cfg.alpaca if cfg.exchange == "alpaca" else None,
+        alpaca_cfg=cfg.alpaca if cfg.exchange in ("alpaca", "tastytrade") else None,
         valid_symbols=valid_symbols,
     )
     if cfg.universe.enabled:
@@ -146,7 +181,7 @@ def main():
                            collectors=collectors, numeric_collectors=numeric_collectors,
                            db_path=args.db, notifier=notifier, universe=universe)
 
-    label = "STOCK" if cfg.exchange == "alpaca" else "CRYPTO"
+    label = "STOCK" if cfg.exchange in ("alpaca", "tastytrade") else "CRYPTO"
     notifier.send(
         f"[{label}] Trader started\n"
         f"Mode: {cfg.mode.upper()}  Strategy: {cfg.strategy}\n"
