@@ -135,13 +135,91 @@ class TastyTradeAdapter(ExchangeAdapter):
         return ask or bid
 
     def get_balance(self) -> dict[str, float]:
-        raise NotImplementedError("implemented in Task 4")
+        balance = self._account.get_balances(self._session)
+        return {
+            "USD": float(balance.cash_balance),
+            "equity": float(balance.net_liquidating_value),
+            "buying_power": float(balance.equity_buying_power),
+        }
 
     def place_order(self, side: str, symbol: str, amount: float) -> Order:
-        raise NotImplementedError("implemented in Task 4")
+        price_est = self.get_price(symbol)
+
+        if side == "sell":
+            positions = self._account.get_positions(self._session)
+            pos = next(
+                (p for p in positions
+                 if p.symbol == symbol and p.instrument_type == InstrumentType.EQUITY),
+                None,
+            )
+            if pos is None or float(pos.quantity) <= 0:
+                raise ValueError(f"No position to sell for {symbol}")
+            qty = int(float(pos.quantity))
+        else:
+            qty = max(1, int(amount))
+
+        action = OrderAction.BUY_TO_OPEN if side == "buy" else OrderAction.SELL_TO_CLOSE
+        leg = Leg(
+            instrument_type=InstrumentType.EQUITY,
+            symbol=symbol,
+            quantity=Decimal(str(qty)),
+            action=action,
+        )
+        new_order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.MARKET,
+            legs=[leg],
+        )
+        response = self._account.place_order(self._session, new_order, dry_run=False)
+        placed = response.order
+        order_id = str(placed.id)
+
+        filled_price = price_est
+        for _ in range(6):
+            fp = getattr(placed, "filled_price", None)
+            if fp and float(fp) > 0:
+                filled_price = float(fp)
+                break
+            time.sleep(0.5)
+            try:
+                placed = self._account.get_order(self._session, placed.id)
+            except Exception:
+                break
+
+        return Order(
+            id=order_id,
+            symbol=symbol,
+            side=side,
+            amount=float(qty),
+            price=filled_price,
+            mode="paper" if self._paper else "live",
+            status=str(placed.status),
+        )
 
     def get_open_orders(self, symbol: str) -> list[Order]:
-        raise NotImplementedError("implemented in Task 4")
+        live_orders = self._account.get_live_orders(self._session)
+        result = []
+        for o in live_orders:
+            legs = getattr(o, "legs", [])
+            if not legs or legs[0].symbol != symbol:
+                continue
+            leg = legs[0]
+            side = "buy" if leg.action == OrderAction.BUY_TO_OPEN else "sell"
+            result.append(Order(
+                id=str(o.id),
+                symbol=symbol,
+                side=side,
+                amount=float(leg.quantity),
+                price=float(o.price) if o.price else 0.0,
+                mode="paper" if self._paper else "live",
+                status=str(o.status),
+            ))
+        return result
 
     def cancel_order(self, order_id: str, symbol: str) -> bool:
-        raise NotImplementedError("implemented in Task 4")
+        try:
+            self._account.delete_order(self._session, int(order_id))
+            return True
+        except Exception as e:
+            logger.warning("Failed to cancel TastyTrade order %s: %s", order_id, e)
+            return False

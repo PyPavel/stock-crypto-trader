@@ -1,5 +1,9 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
+
+from tastytrade.order import OrderAction
+from tastytrade.instruments import InstrumentType
 
 from trader.models import Candle, Order
 
@@ -80,3 +84,128 @@ def test_get_candles_returns_candle_objects():
     assert candles[0].symbol == "AAPL"
     assert candles[0].close == 105.0
     assert candles[0].volume == 1000.0
+
+
+def test_get_balance():
+    adapter, mock_session, mock_account, _ = make_adapter()
+    mock_balance = MagicMock()
+    mock_balance.cash_balance = Decimal("4500.00")
+    mock_balance.net_liquidating_value = Decimal("5200.00")
+    mock_balance.equity_buying_power = Decimal("4500.00")
+    mock_account.get_balances.return_value = mock_balance
+
+    bal = adapter.get_balance()
+    assert bal["USD"] == 4500.0
+    assert bal["equity"] == 5200.0
+    assert bal["buying_power"] == 4500.0
+
+
+def test_place_order_buy():
+    adapter, mock_session, mock_account, mock_data = make_adapter()
+    mock_quote = MagicMock()
+    mock_quote.ask_price = 150.0
+    mock_quote.bid_price = 149.0
+    mock_data.get_stock_latest_quote.return_value = {"AAPL": mock_quote}
+
+    mock_placed = MagicMock()
+    mock_placed.order.id = 42
+    mock_placed.order.status = "Filled"
+    mock_placed.order.filled_price = Decimal("149.50")
+    mock_account.place_order.return_value = mock_placed
+
+    order = adapter.place_order("buy", "AAPL", 10.0)
+    assert isinstance(order, Order)
+    assert order.symbol == "AAPL"
+    assert order.side == "buy"
+    assert order.mode == "paper"
+    assert order.id == "42"
+    mock_account.place_order.assert_called_once()
+
+
+def test_place_order_buy_fractional_rounds_to_int():
+    adapter, mock_session, mock_account, mock_data = make_adapter()
+    mock_quote = MagicMock()
+    mock_quote.ask_price = 150.0
+    mock_quote.bid_price = 149.0
+    mock_data.get_stock_latest_quote.return_value = {"AAPL": mock_quote}
+
+    mock_placed = MagicMock()
+    mock_placed.order.id = 43
+    mock_placed.order.status = "Filled"
+    mock_placed.order.filled_price = Decimal("149.50")
+    mock_account.place_order.return_value = mock_placed
+
+    order = adapter.place_order("buy", "AAPL", 0.7)
+    assert order.amount == 1
+
+
+def test_place_order_sell_uses_position_qty():
+    adapter, mock_session, mock_account, mock_data = make_adapter()
+    mock_quote = MagicMock()
+    mock_quote.ask_price = 150.0
+    mock_quote.bid_price = 149.0
+    mock_data.get_stock_latest_quote.return_value = {"AAPL": mock_quote}
+
+    mock_pos = MagicMock()
+    mock_pos.symbol = "AAPL"
+    mock_pos.quantity = Decimal("5")
+    mock_pos.instrument_type = InstrumentType.EQUITY
+    mock_account.get_positions.return_value = [mock_pos]
+
+    mock_placed = MagicMock()
+    mock_placed.order.id = 44
+    mock_placed.order.status = "Filled"
+    mock_placed.order.filled_price = Decimal("149.50")
+    mock_account.place_order.return_value = mock_placed
+
+    order = adapter.place_order("sell", "AAPL", 3.0)
+    assert order.amount == 5.0  # uses actual position qty, not requested amount
+
+
+def test_place_order_sell_no_position_raises():
+    adapter, mock_session, mock_account, mock_data = make_adapter()
+    mock_quote = MagicMock()
+    mock_quote.ask_price = 150.0
+    mock_quote.bid_price = 149.0
+    mock_data.get_stock_latest_quote.return_value = {"AAPL": mock_quote}
+    mock_account.get_positions.return_value = []
+
+    import pytest
+    with pytest.raises(ValueError, match="No position to sell"):
+        adapter.place_order("sell", "AAPL", 3.0)
+
+
+def test_get_open_orders_filters_by_symbol():
+    adapter, mock_session, mock_account, _ = make_adapter()
+    mock_o1 = MagicMock()
+    mock_o1.id = 10
+    mock_o1.legs = [MagicMock(symbol="AAPL", action=OrderAction.BUY_TO_OPEN, quantity=Decimal("5"))]
+    mock_o1.status = "Live"
+    mock_o1.price = Decimal("0")
+
+    mock_o2 = MagicMock()
+    mock_o2.id = 11
+    mock_o2.legs = [MagicMock(symbol="TSLA", action=OrderAction.BUY_TO_OPEN, quantity=Decimal("2"))]
+    mock_o2.status = "Live"
+    mock_o2.price = Decimal("0")
+
+    mock_account.get_live_orders.return_value = [mock_o1, mock_o2]
+
+    orders = adapter.get_open_orders("AAPL")
+    assert len(orders) == 1
+    assert orders[0].symbol == "AAPL"
+
+
+def test_cancel_order_returns_true():
+    adapter, mock_session, mock_account, _ = make_adapter()
+    mock_account.delete_order.return_value = None
+    result = adapter.cancel_order("42", "AAPL")
+    assert result is True
+    mock_account.delete_order.assert_called_once_with(mock_session, 42)
+
+
+def test_cancel_order_returns_false_on_error():
+    adapter, mock_session, mock_account, _ = make_adapter()
+    mock_account.delete_order.side_effect = Exception("not found")
+    result = adapter.cancel_order("99", "AAPL")
+    assert result is False
