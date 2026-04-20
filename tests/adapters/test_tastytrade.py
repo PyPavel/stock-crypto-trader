@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from tastytrade.order import OrderAction
+from tastytrade.order import OrderAction, OrderStatus
 from tastytrade.instruments import InstrumentType
 
 from trader.models import Candle, Order
@@ -110,7 +110,7 @@ def test_place_order_buy():
 
     mock_placed = MagicMock()
     mock_placed.order.id = 42
-    mock_placed.order.status = "Filled"
+    mock_placed.order.status = OrderStatus.FILLED
     mock_placed.order.price = Decimal("149.50")
     mock_account.place_order.return_value = mock_placed
 
@@ -132,7 +132,7 @@ def test_place_order_buy_fractional_rounds_to_int():
 
     mock_placed = MagicMock()
     mock_placed.order.id = 43
-    mock_placed.order.status = "Filled"
+    mock_placed.order.status = OrderStatus.FILLED
     mock_placed.order.price = Decimal("149.50")
     mock_account.place_order.return_value = mock_placed
 
@@ -155,7 +155,7 @@ def test_place_order_sell_uses_position_qty():
 
     mock_placed = MagicMock()
     mock_placed.order.id = 44
-    mock_placed.order.status = "Filled"
+    mock_placed.order.status = OrderStatus.FILLED
     mock_placed.order.price = Decimal("149.50")
     mock_account.place_order.return_value = mock_placed
 

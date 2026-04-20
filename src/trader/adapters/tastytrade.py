@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from tastytrade import Session
 from tastytrade.account import Account
 from tastytrade.order import (
-    NewOrder, Leg, OrderAction, OrderTimeInForce, OrderType
+    NewOrder, Leg, OrderAction, OrderTimeInForce, OrderType, OrderStatus
 )
 from tastytrade.instruments import InstrumentType
 
@@ -158,7 +158,7 @@ class TastyTradeAdapter(ExchangeAdapter):
                 raise ValueError(f"No position to sell for {symbol}")
             qty = int(float(pos.quantity))
         else:
-            qty = max(1, int(amount))
+            qty = max(1, round(amount))
 
         action = OrderAction.BUY_TO_OPEN if side == "buy" else OrderAction.SELL_TO_CLOSE
         leg = Leg(
@@ -178,7 +178,8 @@ class TastyTradeAdapter(ExchangeAdapter):
 
         filled_price = price_est
         for _ in range(6):
-            if str(placed.status).lower() in ("filled", "executed"):
+            status_val = placed.status.value if hasattr(placed.status, "value") else str(placed.status)
+            if status_val.lower() in ("filled", "executed"):
                 if placed.price and float(placed.price) > 0:
                     filled_price = float(placed.price)
                 break
@@ -190,6 +191,7 @@ class TastyTradeAdapter(ExchangeAdapter):
         else:
             logger.warning("TastyTrade order %s not confirmed filled after polling; using price estimate", order_id)
 
+        final_status = placed.status.value if hasattr(placed.status, "value") else str(placed.status)
         return Order(
             id=order_id,
             symbol=symbol,
@@ -197,7 +199,7 @@ class TastyTradeAdapter(ExchangeAdapter):
             amount=float(qty),
             price=filled_price,
             mode="paper" if self._paper else "live",
-            status=str(placed.status),
+            status=final_status,
         )
 
     def get_open_orders(self, symbol: str) -> list[Order]:

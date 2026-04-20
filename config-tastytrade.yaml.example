@@ -22,6 +22,7 @@ tastytrade:
 
 alpaca:                # required for market data (free IEX feed)
   paper: true          # value ignored for data-only use
+  # Set ALPACA_API_KEY and ALPACA_API_SECRET env vars (free tier works)
 
 telegram:
   bot_token: ""        # set TELEGRAM_BOT_TOKEN env var
