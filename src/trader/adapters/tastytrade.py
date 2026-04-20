@@ -53,7 +53,7 @@ class TastyTradeAdapter(ExchangeAdapter):
         self._session = Session(
             tastytrade_cfg.username,
             tastytrade_cfg.password,
-            is_test_env=tastytrade_cfg.paper,
+            is_test=tastytrade_cfg.paper,
         )
         accounts = Account.get_accounts(self._session)
         if not accounts:
@@ -176,9 +176,9 @@ class TastyTradeAdapter(ExchangeAdapter):
 
         filled_price = price_est
         for _ in range(6):
-            fp = getattr(placed, "filled_price", None)
-            if fp and float(fp) > 0:
-                filled_price = float(fp)
+            if str(placed.status).lower() in ("filled", "executed"):
+                if placed.price and float(placed.price) > 0:
+                    filled_price = float(placed.price)
                 break
             time.sleep(0.5)
             try:
