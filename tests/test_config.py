@@ -36,3 +36,33 @@ def test_invalid_strategy_raises(tmp_path):
     )
     with pytest.raises(ValueError, match="strategy"):
         load_config(str(cfg_file))
+
+
+def test_tastytrade_config_defaults():
+    from trader.config import TastyTradeConfig
+    cfg = TastyTradeConfig()
+    assert cfg.username == ""
+    assert cfg.password == ""
+    assert cfg.account_number == ""
+    assert cfg.paper is True
+
+
+def test_tastytrade_config_in_main_config(tmp_path):
+    from trader.config import load_config
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "exchange: tastytrade\n"
+        "mode: paper\n"
+        "strategy: moderate\n"
+        "capital: 5000\n"
+        "pairs: [AAPL]\n"
+        "tastytrade:\n"
+        "  username: user\n"
+        "  password: pass\n"
+        "  account_number: ABC123\n"
+        "  paper: true\n"
+    )
+    cfg = load_config(str(config_file))
+    assert cfg.tastytrade.username == "user"
+    assert cfg.tastytrade.account_number == "ABC123"
+    assert cfg.tastytrade.paper is True

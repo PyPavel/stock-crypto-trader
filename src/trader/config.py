@@ -25,6 +25,14 @@ class AlpacaConfig:
 
 
 @dataclass
+class TastyTradeConfig:
+    username: str = ""
+    password: str = ""
+    account_number: str = ""
+    paper: bool = True
+
+
+@dataclass
 class RedditConfig:
     client_id: str = ""
     client_secret: str = ""
@@ -117,6 +125,7 @@ class Config:
     mimo: MimoConfig = field(default_factory=MimoConfig)
     coinbase: CoinbaseConfig = field(default_factory=CoinbaseConfig)
     alpaca: AlpacaConfig = field(default_factory=AlpacaConfig)
+    tastytrade: TastyTradeConfig = field(default_factory=TastyTradeConfig)
     reddit: RedditConfig = field(default_factory=RedditConfig)
     cryptopanic: CryptoPanicConfig = field(default_factory=CryptoPanicConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
@@ -160,6 +169,7 @@ def load_config(path: str) -> Config:
         ("mimo", MimoConfig),
         ("coinbase", CoinbaseConfig),
         ("alpaca", AlpacaConfig),
+        ("tastytrade", TastyTradeConfig),
         ("reddit", RedditConfig),
         ("cryptopanic", CryptoPanicConfig),
         ("discord", DiscordConfig),
@@ -194,6 +204,14 @@ def load_config(path: str) -> Config:
         cfg.alpaca.api_secret = os.environ["ALPACA_API_SECRET"]
     if os.environ.get("ALPACA_PAPER") is not None:
         cfg.alpaca.paper = os.environ["ALPACA_PAPER"].lower() in ("1", "true", "yes")
+    if os.environ.get("TASTYTRADE_USERNAME"):
+        cfg.tastytrade.username = os.environ["TASTYTRADE_USERNAME"]
+    if os.environ.get("TASTYTRADE_PASSWORD"):
+        cfg.tastytrade.password = os.environ["TASTYTRADE_PASSWORD"]
+    if os.environ.get("TASTYTRADE_ACCOUNT_NUMBER"):
+        cfg.tastytrade.account_number = os.environ["TASTYTRADE_ACCOUNT_NUMBER"]
+    if os.environ.get("TASTYTRADE_PAPER") is not None:
+        cfg.tastytrade.paper = os.environ["TASTYTRADE_PAPER"].lower() in ("1", "true", "yes")
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
         cfg.telegram.bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     if os.environ.get("TELEGRAM_CHAT_ID"):
