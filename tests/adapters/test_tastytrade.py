@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -110,7 +111,7 @@ def test_place_order_buy():
     mock_placed = MagicMock()
     mock_placed.order.id = 42
     mock_placed.order.status = "Filled"
-    mock_placed.order.filled_price = Decimal("149.50")
+    mock_placed.order.price = Decimal("149.50")
     mock_account.place_order.return_value = mock_placed
 
     order = adapter.place_order("buy", "AAPL", 10.0)
@@ -132,7 +133,7 @@ def test_place_order_buy_fractional_rounds_to_int():
     mock_placed = MagicMock()
     mock_placed.order.id = 43
     mock_placed.order.status = "Filled"
-    mock_placed.order.filled_price = Decimal("149.50")
+    mock_placed.order.price = Decimal("149.50")
     mock_account.place_order.return_value = mock_placed
 
     order = adapter.place_order("buy", "AAPL", 0.7)
@@ -155,7 +156,7 @@ def test_place_order_sell_uses_position_qty():
     mock_placed = MagicMock()
     mock_placed.order.id = 44
     mock_placed.order.status = "Filled"
-    mock_placed.order.filled_price = Decimal("149.50")
+    mock_placed.order.price = Decimal("149.50")
     mock_account.place_order.return_value = mock_placed
 
     order = adapter.place_order("sell", "AAPL", 3.0)
@@ -170,7 +171,6 @@ def test_place_order_sell_no_position_raises():
     mock_data.get_stock_latest_quote.return_value = {"AAPL": mock_quote}
     mock_account.get_positions.return_value = []
 
-    import pytest
     with pytest.raises(ValueError, match="No position to sell"):
         adapter.place_order("sell", "AAPL", 3.0)
 

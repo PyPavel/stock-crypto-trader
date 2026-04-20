@@ -143,6 +143,8 @@ class TastyTradeAdapter(ExchangeAdapter):
         }
 
     def place_order(self, side: str, symbol: str, amount: float) -> Order:
+        if side not in ("buy", "sell"):
+            raise ValueError(f"Invalid side: {side!r}")
         price_est = self.get_price(symbol)
 
         if side == "sell":
@@ -185,6 +187,8 @@ class TastyTradeAdapter(ExchangeAdapter):
                 placed = self._account.get_order(self._session, placed.id)
             except Exception:
                 break
+        else:
+            logger.warning("TastyTrade order %s not confirmed filled after polling; using price estimate", order_id)
 
         return Order(
             id=order_id,
