@@ -154,7 +154,7 @@ class SymbolUniverse:
         try:
             if self._exchange == "coinbase":
                 data = self._fetch_coingecko_universe()
-            elif self._exchange == "alpaca":
+            elif self._exchange in ("alpaca", "tastytrade"):
                 data = self._fetch_alpaca_universe()
             else:
                 logger.warning("Unknown exchange '%s' — cannot refresh universe", self._exchange)
