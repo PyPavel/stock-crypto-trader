@@ -2,6 +2,7 @@ import logging
 import time
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from tastytrade import Session
@@ -48,12 +49,19 @@ INTERVAL_MAP: dict[str, TimeFrame] = {
 class TastyTradeAdapter(ExchangeAdapter):
     """TastyTrade adapter for US equities. Execution via TastyTrade; market data via Alpaca IEX."""
 
+    # Persists the rotating remember-token across container restarts without
+    # requiring env var updates after each auth.
+    _TOKEN_FILE = Path("/app/data/tt_remember_token")
+
     def __init__(self, tastytrade_cfg: TastyTradeConfig, alpaca_data_key: str, alpaca_data_secret: str):
         self._paper = tastytrade_cfg.paper
-        if tastytrade_cfg.remember_token:
+
+        # Token priority: file (rotated) > env var > password
+        token = self._load_token() or tastytrade_cfg.remember_token
+        if token:
             self._session = Session(
                 tastytrade_cfg.username,
-                remember_token=tastytrade_cfg.remember_token,
+                remember_token=token,
                 remember_me=True,
             )
         else:
@@ -62,6 +70,8 @@ class TastyTradeAdapter(ExchangeAdapter):
                 password=tastytrade_cfg.password,
                 remember_me=True,
             )
+        self._save_token(self._session.remember_token)
+
         accounts = Account.get_accounts(self._session)
         if not accounts:
             raise RuntimeError("TastyTrade: no accounts returned for this session")
@@ -85,6 +95,21 @@ class TastyTradeAdapter(ExchangeAdapter):
             api_key=alpaca_data_key,
             secret_key=alpaca_data_secret,
         )
+
+    def _load_token(self) -> str:
+        try:
+            return self._TOKEN_FILE.read_text().strip()
+        except OSError:
+            return ""
+
+    def _save_token(self, token: str | None) -> None:
+        if not token:
+            return
+        try:
+            self._TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self._TOKEN_FILE.write_text(token)
+        except OSError as e:
+            logger.warning("Could not persist remember-token: %s", e)
 
     def is_market_open(self) -> bool:
         now_et = datetime.now(_NYSE_TZ)
