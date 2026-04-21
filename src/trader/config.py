@@ -28,6 +28,7 @@ class AlpacaConfig:
 class TastyTradeConfig:
     username: str = ""
     password: str = ""
+    remember_token: str = ""   # preferred over password; obtained after first device challenge
     account_number: str = ""   # picks first account if empty
     paper: bool = True
 
@@ -208,6 +209,8 @@ def load_config(path: str) -> Config:
         cfg.tastytrade.username = os.environ["TASTYTRADE_USERNAME"]
     if os.environ.get("TASTYTRADE_PASSWORD"):
         cfg.tastytrade.password = os.environ["TASTYTRADE_PASSWORD"]
+    if os.environ.get("TASTYTRADE_REMEMBER_TOKEN"):
+        cfg.tastytrade.remember_token = os.environ["TASTYTRADE_REMEMBER_TOKEN"]
     if os.environ.get("TASTYTRADE_ACCOUNT_NUMBER"):
         cfg.tastytrade.account_number = os.environ["TASTYTRADE_ACCOUNT_NUMBER"]
     if os.environ.get("TASTYTRADE_PAPER") is not None:

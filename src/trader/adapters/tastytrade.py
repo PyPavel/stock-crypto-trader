@@ -50,11 +50,18 @@ class TastyTradeAdapter(ExchangeAdapter):
 
     def __init__(self, tastytrade_cfg: TastyTradeConfig, alpaca_data_key: str, alpaca_data_secret: str):
         self._paper = tastytrade_cfg.paper
-        self._session = Session(
-            tastytrade_cfg.username,
-            tastytrade_cfg.password,
-            is_test=tastytrade_cfg.paper,
-        )
+        if tastytrade_cfg.remember_token:
+            self._session = Session(
+                tastytrade_cfg.username,
+                remember_token=tastytrade_cfg.remember_token,
+                remember_me=True,
+            )
+        else:
+            self._session = Session(
+                tastytrade_cfg.username,
+                password=tastytrade_cfg.password,
+                remember_me=True,
+            )
         accounts = Account.get_accounts(self._session)
         if not accounts:
             raise RuntimeError("TastyTrade: no accounts returned for this session")
@@ -172,10 +179,22 @@ class TastyTradeAdapter(ExchangeAdapter):
             order_type=OrderType.MARKET,
             legs=[leg],
         )
-        response = self._account.place_order(self._session, new_order, dry_run=False)
+        response = self._account.place_order(self._session, new_order, dry_run=self._paper)
+
+        if self._paper:
+            order_id = f"paper-{int(time.time() * 1000)}"
+            return Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                amount=float(qty),
+                price=price_est,
+                mode="paper",
+                status="paper",
+            )
+
         placed = response.order
         order_id = str(placed.id)
-
         filled_price = price_est
         for _ in range(6):
             status_val = placed.status.value if hasattr(placed.status, "value") else str(placed.status)
@@ -198,7 +217,7 @@ class TastyTradeAdapter(ExchangeAdapter):
             side=side,
             amount=float(qty),
             price=filled_price,
-            mode="paper" if self._paper else "live",
+            mode="live",
             status=final_status,
         )
 
