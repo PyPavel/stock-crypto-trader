@@ -85,7 +85,7 @@ class TastyTradeAdapter(ExchangeAdapter):
             )
         self._save_token(self._session.remember_token)
 
-        accounts = Account.get_accounts(self._session)
+        accounts = Account.get(self._session)
         if not accounts:
             raise RuntimeError("TastyTrade: no accounts returned for this session")
         if tastytrade_cfg.account_number:
