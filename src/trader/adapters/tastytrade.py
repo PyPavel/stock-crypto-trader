@@ -5,6 +5,19 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+# Patch fake_useragent before importing tastytrade so Session always uses a
+# fixed UA string. Without this, every container start generates a new random
+# UA and TastyTrade treats it as an unknown device, triggering device challenge.
+try:
+    import fake_useragent as _fua
+    _FIXED_UA = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+    _fua.UserAgent.random = property(lambda self: _FIXED_UA)
+except Exception:
+    pass
+
 from tastytrade import Session
 from tastytrade.account import Account
 from tastytrade.order import (
