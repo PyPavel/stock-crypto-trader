@@ -10,6 +10,7 @@ from trader.notifications.telegram import TelegramNotifier
 from trader.core.signals import SignalGenerator
 from trader.core.risk import RiskManager
 from trader.core.router import OrderRouter
+from trader.core.pdt import PDTGuard
 from trader.portfolio.state import Portfolio
 from trader.portfolio.db import save_signal_history, load_signal_history
 from trader.strategies.registry import get_strategy
@@ -60,6 +61,11 @@ class TradingEngine:
         # Partial TP: track symbols that already took partial profit (reset on full exit)
         self._partial_tp_taken: set[str] = set()
 
+        # PDT guard — Alpaca US-equity accounts only (PDT is an SEC rule, not applicable to crypto)
+        self._pdt: PDTGuard | None = None
+        if config.exchange in ("alpaca", "tastytrade") and hasattr(adapter, "get_day_trade_count"):
+            self._pdt = PDTGuard(adapter)
+
         # Cycle counter for periodic Telegram summaries
         self._cycle_count: int = 0
 
@@ -83,6 +89,9 @@ class TradingEngine:
         if hasattr(self._adapter, "is_market_open") and not self._adapter.is_market_open():
             logger.info("Market is closed — skipping cycle")
             return
+
+        if self._pdt:
+            self._pdt.refresh()
 
         # Determine candidate symbols
         if self._universe is not None and self.config.universe.enabled:
@@ -430,38 +439,51 @@ class TradingEngine:
         if position_usd > 0 and symbol in self.portfolio.positions:
             entry = self.portfolio.positions[symbol]["entry_price"]
 
-            if self._risk.check_stop_loss(symbol, entry, price, atr=current_atr):
-                logger.warning(
-                    "Stop-loss triggered for %s: entry=%.2f, current=%.2f",
-                    symbol, entry, price,
+            # PDT guard: same-day buys cannot be sold when day-trade budget is exhausted.
+            # The position holds overnight; notify once so the loss is visible in Telegram.
+            if self._pdt and not self._pdt.can_exit_today(symbol):
+                peak = self._peak_prices.get(symbol, price)
+                would_exit = (
+                    self._risk.check_stop_loss(symbol, entry, price, atr=current_atr)
+                    or (peak > entry and self._risk.check_trailing_stop(peak, price, atr=current_atr))
+                    or self._risk.check_trade_loss_limit(entry, price, self.portfolio.starting_capital)
                 )
-                self._execute_sell(symbol, position_usd, price, "stop-loss triggered", prices=prices, result=result)
-                return
+                if would_exit:
+                    self._notify_pdt_blocked(symbol, entry, price)
+                # Skip all protective exits — fall through to strategy/cooldown
+            else:
+                if self._risk.check_stop_loss(symbol, entry, price, atr=current_atr):
+                    logger.warning(
+                        "Stop-loss triggered for %s: entry=%.2f, current=%.2f",
+                        symbol, entry, price,
+                    )
+                    self._execute_sell(symbol, position_usd, price, "stop-loss triggered", prices=prices, result=result)
+                    return
 
-            peak = self._peak_prices.get(symbol, price)
-            if peak > entry and self._risk.check_trailing_stop(peak, price, atr=current_atr):
-                logger.warning(
-                    "Trailing stop triggered for %s: peak=%.2f, current=%.2f",
-                    symbol, peak, price,
-                )
-                self._execute_sell(symbol, position_usd, price, "trailing-stop triggered", prices=prices, result=result)
-                return
+                peak = self._peak_prices.get(symbol, price)
+                if peak > entry and self._risk.check_trailing_stop(peak, price, atr=current_atr):
+                    logger.warning(
+                        "Trailing stop triggered for %s: peak=%.2f, current=%.2f",
+                        symbol, peak, price,
+                    )
+                    self._execute_sell(symbol, position_usd, price, "trailing-stop triggered", prices=prices, result=result)
+                    return
 
-            if self._risk.check_trade_loss_limit(entry, price, self.portfolio.starting_capital):
-                logger.warning(
-                    "Per-trade loss limit triggered for %s: entry=%.2f, current=%.2f",
-                    symbol, entry, price,
-                )
-                self._execute_sell(symbol, position_usd, price, "per-trade-loss-limit triggered", prices=prices, result=result)
-                return
+                if self._risk.check_trade_loss_limit(entry, price, self.portfolio.starting_capital):
+                    logger.warning(
+                        "Per-trade loss limit triggered for %s: entry=%.2f, current=%.2f",
+                        symbol, entry, price,
+                    )
+                    self._execute_sell(symbol, position_usd, price, "per-trade-loss-limit triggered", prices=prices, result=result)
+                    return
 
-            if self._risk.check_take_profit(entry, price):
-                logger.warning(
-                    "Take-profit triggered for %s: entry=%.2f, current=%.2f (+%.1f%%)",
-                    symbol, entry, price, (price - entry) / entry * 100,
-                )
-                self._execute_sell(symbol, position_usd, price, "take-profit triggered", prices=prices, result=result)
-                return
+                if self._risk.check_take_profit(entry, price):
+                    logger.warning(
+                        "Take-profit triggered for %s: entry=%.2f, current=%.2f (+%.1f%%)",
+                        symbol, entry, price, (price - entry) / entry * 100,
+                    )
+                    self._execute_sell(symbol, position_usd, price, "take-profit triggered", prices=prices, result=result)
+                    return
 
         # 4c. Cooldown check (partial TP also respects cooldown — prevents cascade halving)
         if self._in_cooldown(symbol):
@@ -502,7 +524,8 @@ class TradingEngine:
                 tech_score=result.get("tech_score", 0.0),
                 trend=trend,
                 sentiment=result.get("raw_sentiment", 0.0),
-                headlines=result.get("texts", [])
+                headlines=result.get("texts", []),
+                pdt_remaining=self._pdt.remaining() if self._pdt else None,
             )
             if advise["judgment"] == "avoid":
                 logger.info("LLM Advisor VETO for %s: %s", symbol, advise.get("reason"))
@@ -520,6 +543,20 @@ class TradingEngine:
         if decision["action"] == "buy" and not can_buy:
             logger.info("BUY skipped for %s: not in top active pairs this cycle", symbol)
             return
+
+        # PDT: gate buys by remaining day-trade budget and score threshold
+        if decision["action"] == "buy" and self._pdt:
+            remaining = self._pdt.remaining()
+            if remaining == 0:
+                logger.info("BUY blocked for %s: PDT budget exhausted", symbol)
+                return
+            threshold = self._pdt.buy_threshold()
+            if threshold is not None and result["combined_score"] < threshold:
+                logger.info(
+                    "BUY blocked for %s: score %.3f below PDT threshold %.2f (remaining=%d)",
+                    symbol, result["combined_score"], threshold, remaining,
+                )
+                return
 
         # 6. Risk check and execution
         if decision["action"] == "buy":
@@ -587,6 +624,8 @@ class TradingEngine:
             self.portfolio.record_trade(trade)
             self._record_trade_time(symbol)
             self._peak_prices[symbol] = order.price
+            if self._pdt:
+                self._pdt.record_buy(symbol)
             logger.info("BUY %s: %.6f @ %.2f", symbol, order.amount, order.price)
             self._notify("buy", symbol, order.amount, order.price, decision["reason"], prices=prices, result=result)
 
@@ -650,3 +689,21 @@ class TradingEngine:
             self._partial_tp_taken.discard(symbol)
         logger.info("SELL %s: %.6f @ %.2f (%s)", symbol, order.amount, order.price, reason)
         self._notify("sell", symbol, order.amount, order.price, reason, prices=prices, result=result)
+
+    def _notify_pdt_blocked(self, symbol: str, entry: float, price: float) -> None:
+        """Alert Telegram when a protective exit is blocked by PDT budget exhaustion."""
+        loss_pct = (entry - price) / entry * 100
+        logger.warning(
+            "PDT blocked exit for %s: entry=%.2f, current=%.2f (%.1f%% loss), holding overnight",
+            symbol, entry, price, loss_pct,
+        )
+        if self._notifier:
+            remaining = self._pdt.remaining() if self._pdt else 0
+            label = "STOCK"
+            msg = (
+                f"[{label}] PDT BLOCKED EXIT — {symbol}\n"
+                f"Stop-loss triggered but PDT budget exhausted ({remaining} day-trades left).\n"
+                f"Entry: ${entry:.2f}  Current: ${price:.2f}  Loss: {loss_pct:.1f}%\n"
+                f"Holding overnight — will reassess next session."
+            )
+            self._notifier.send(msg)

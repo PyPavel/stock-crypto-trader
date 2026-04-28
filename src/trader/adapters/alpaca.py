@@ -146,6 +146,11 @@ class AlpacaAdapter(ExchangeAdapter):
             "buying_power": float(account.buying_power),
         }
 
+    def get_day_trade_count(self) -> int:
+        """Return the number of day-trades used in the current 5-rolling-day window."""
+        account = self._trading.get_account()
+        return int(account.daytrade_count or 0)
+
     def place_order(self, side: str, symbol: str, amount: float) -> Order:
         """Place a market order. `amount` is in shares (from router)."""
         import time
@@ -158,7 +163,7 @@ class AlpacaAdapter(ExchangeAdapter):
             # caused by floating point drift between our portfolio tracking and Alpaca's records
             try:
                 position = self._trading.get_open_position(symbol)
-                qty = float(position.qty)
+                qty = float(position.qty_available or position.qty)
             except Exception:
                 qty = amount
             if qty <= 0:
@@ -183,16 +188,29 @@ class AlpacaAdapter(ExchangeAdapter):
         try:
             raw = self._trading.submit_order(request)
         except APIError as e:
-            # PDT rejection: Alpaca returns code 40310100. Translate to typed
-            # exception so the engine can mark the symbol PDT-blocked and avoid
-            # hammering the same order every cycle.
             err = getattr(e, "_error", None)
             code = None
             if isinstance(err, dict):
                 code = err.get("code")
             if code == PDT_ERROR_CODE or str(PDT_ERROR_CODE) in str(e):
                 raise PDTRejectedError(symbol) from e
-            raise
+            # Insufficient qty: Alpaca's position endpoint can return a slightly
+            # higher qty than their order validator allows. Retry once with the
+            # exact available qty from the error response.
+            if side == "sell" and (code == 40310000 or "insufficient qty" in str(e).lower()):
+                available = float(err.get("available", 0)) if isinstance(err, dict) else 0.0
+                if available > 0:
+                    request = MarketOrderRequest(
+                        symbol=symbol,
+                        qty=round(available, 9),
+                        side=alpaca_side,
+                        time_in_force=TimeInForce.DAY,
+                    )
+                    raw = self._trading.submit_order(request)
+                else:
+                    raise
+            else:
+                raise
 
         # Poll for fill — Alpaca market orders may not fill instantly
         order_id = str(raw.id)
