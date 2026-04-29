@@ -60,3 +60,9 @@ risk:
     mega_tech: [AAPL, MSFT, GOOGL, AMZN, META, NVDA]
     fintech: [JPM, V, MA]
 strategy: moderate
+time_gate:
+  enabled: true
+  buy_start: "15:00"
+  buy_end: "16:00"
+  sell_start: "09:30"
+  sell_end: "10:30"

@@ -5,6 +5,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from trader.config import load_config
 from trader.llm.sentiment import SentimentAnalyzer
 from trader.core.engine import TradingEngine
+from trader.core.time_gate import TimeWindowGate
 from trader.dashboard.api import create_app
 from trader.notifications.telegram import TelegramNotifier
 
@@ -63,6 +64,7 @@ def main():
         from trader.collectors.unusual_whales import UnusualWhalesCollector
         from trader.collectors.google_trends import GoogleTrendsCollector
         from trader.collectors.earnings import EarningsCollector
+        from trader.collectors.overnight_catalyst import OvernightCatalystCollector
 
         adapter = AlpacaAdapter(
             api_key=cfg.alpaca.api_key,
@@ -89,6 +91,7 @@ def main():
             PolymarketCollector(),                   # Prediction market crowd sentiment
             UnusualWhalesCollector(),                # Options flow: call/put ratio signal
             GoogleTrendsCollector(asset_class="stock"),  # Search interest trend signal
+            OvernightCatalystCollector(),            # Overnight gap / catalyst signal
         ]
     elif cfg.exchange == "tastytrade":
         from trader.adapters.tastytrade import TastyTradeAdapter
@@ -98,6 +101,7 @@ def main():
         from trader.collectors.unusual_whales import UnusualWhalesCollector
         from trader.collectors.google_trends import GoogleTrendsCollector
         from trader.collectors.earnings import EarningsCollector
+        from trader.collectors.overnight_catalyst import OvernightCatalystCollector
 
         adapter = TastyTradeAdapter(
             tastytrade_cfg=cfg.tastytrade,
@@ -124,6 +128,7 @@ def main():
             PolymarketCollector(),
             UnusualWhalesCollector(),
             GoogleTrendsCollector(asset_class="stock"),
+            OvernightCatalystCollector(),            # Overnight gap / catalyst signal
         ]
     else:
         # Default: coinbase (existing logic unchanged)
@@ -176,10 +181,18 @@ def main():
     if cfg.universe.enabled:
         universe.refresh_universe()
 
+    time_gate = TimeWindowGate(cfg.time_gate) if cfg.time_gate.enabled else None
+    if time_gate:
+        logger.info(
+            "TimeWindowGate enabled: buy=%s–%s ET, sell=%s–%s ET",
+            cfg.time_gate.buy_start, cfg.time_gate.buy_end,
+            cfg.time_gate.sell_start, cfg.time_gate.sell_end,
+        )
     engine = TradingEngine(config=cfg, adapter=adapter, sentiment_analyzer=sentiment,
                            advisor=advisor,
                            collectors=collectors, numeric_collectors=numeric_collectors,
-                           db_path=args.db, notifier=notifier, universe=universe)
+                           db_path=args.db, notifier=notifier, universe=universe,
+                           time_gate=time_gate)
 
     label = "STOCK" if cfg.exchange in ("alpaca", "tastytrade") else "CRYPTO"
     notifier.send(
