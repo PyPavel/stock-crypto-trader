@@ -11,6 +11,7 @@ from trader.core.signals import SignalGenerator
 from trader.core.risk import RiskManager
 from trader.core.router import OrderRouter
 from trader.core.pdt import PDTGuard
+from trader.core.time_gate import TimeWindowGate
 from trader.portfolio.state import Portfolio
 from trader.portfolio.db import save_signal_history, load_signal_history
 from trader.strategies.registry import get_strategy
@@ -32,6 +33,7 @@ class TradingEngine:
         db_path: str = "trader.db",
         notifier=None,
         universe=None,
+        time_gate: "TimeWindowGate | None" = None,
     ):
         self.config = config
         self._adapter = adapter
@@ -65,6 +67,7 @@ class TradingEngine:
         self._pdt: PDTGuard | None = None
         if config.exchange in ("alpaca", "tastytrade") and hasattr(adapter, "get_day_trade_count"):
             self._pdt = PDTGuard(adapter)
+        self._time_gate = time_gate
 
         # Cycle counter for periodic Telegram summaries
         self._cycle_count: int = 0
@@ -538,6 +541,15 @@ class TradingEngine:
                                 symbol, advise["conviction"], multiplier)
                     decision["usd_amount"] *= multiplier
                     decision["reason"] += f" (LLM High Conviction Boost x{multiplier})"
+
+        # 5c. Time window gate — block buys/sells outside configured windows
+        if self._time_gate:
+            if decision["action"] == "buy" and not self._time_gate.can_buy():
+                logger.info("TIME GATE: buy blocked for %s (outside buy window)", symbol)
+                return
+            if decision["action"] == "sell" and not self._time_gate.can_sell():
+                logger.info("TIME GATE: sell blocked for %s (outside sell window)", symbol)
+                return
 
         # Block new buys if symbol didn't rank in top active_pairs
         if decision["action"] == "buy" and not can_buy:

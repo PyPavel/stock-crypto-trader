@@ -82,3 +82,64 @@ def test_stop_loss_triggers_sell(tmp_path):
     sell_trades = [t for t in trades if t.side == "sell"]
     assert len(sell_trades) >= 1
     assert sell_trades[0].narrative == "stop-loss triggered"
+
+
+def test_time_gate_blocks_buy_outside_window(tmp_path):
+    """TimeWindowGate that always blocks buys converts buy decision to hold."""
+    from unittest.mock import MagicMock, patch
+    engine = make_engine(tmp_path)
+    gate = MagicMock()
+    gate.can_buy.return_value = False
+    gate.can_sell.return_value = True
+    engine._time_gate = gate
+
+    engine._strategy.decide = MagicMock(return_value={
+        "action": "buy", "usd_amount": 100.0, "reason": "test"
+    })
+    engine._advisor = None
+    engine._pdt = None
+
+    result = {
+        "price": 100.0, "candles": [], "tech_signal": MagicMock(score=0.5, trend_bullish=True, rsi=50),
+        "sentiment": MagicMock(score=0.5), "tech_score": 0.5, "ml_score": None,
+        "trend_bullish": True, "raw_sentiment": 0.5, "combined_score": 0.5,
+        "atr": 1.0, "texts": [],
+    }
+    with patch.object(engine, "_execute_sell") as mock_sell:
+        engine._execute_decisions("AAPL", result, {}, can_buy=True)
+        # The time gate blocks buy before it reaches the buy execution block;
+        # no trade should have been recorded
+        mock_sell.assert_not_called()
+        assert len(engine.portfolio.get_trades()) == 0
+
+
+def test_time_gate_blocks_sell_outside_window(tmp_path):
+    """TimeWindowGate that always blocks sells converts sell decision to hold."""
+    from unittest.mock import MagicMock, patch
+    engine = make_engine(tmp_path)
+    gate = MagicMock()
+    gate.can_buy.return_value = True
+    gate.can_sell.return_value = False
+    engine._time_gate = gate
+
+    engine._strategy.decide = MagicMock(return_value={
+        "action": "sell", "usd_amount": 100.0, "reason": "test"
+    })
+    engine._advisor = None
+    engine._pdt = None
+
+    # Inject a position so the strategy sell path is reached
+    engine.portfolio.positions["AAPL"] = {"amount": 1.0, "entry_price": 100.0}
+    engine._peak_prices["AAPL"] = 100.0
+
+    result = {
+        "price": 100.0, "candles": [], "tech_signal": MagicMock(score=-0.5, trend_bullish=False, rsi=30),
+        "sentiment": MagicMock(score=-0.5), "tech_score": -0.5, "ml_score": None,
+        "trend_bullish": False, "raw_sentiment": -0.5, "combined_score": -0.5,
+        "atr": 1.0, "texts": [],
+    }
+    with patch.object(engine, "_execute_sell") as mock_sell:
+        engine._execute_decisions("AAPL", result, {"AAPL": 100.0}, can_buy=False)
+        # stop-loss won't fire (entry == price, no loss), so _execute_sell is only
+        # reachable via strategy path — which is blocked by the time gate
+        mock_sell.assert_not_called()
