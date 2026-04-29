@@ -89,3 +89,49 @@ def test_tastytrade_config_env_overrides(tmp_path, monkeypatch):
     assert cfg.tastytrade.password == "envpass"
     assert cfg.tastytrade.account_number == "ENV999"
     assert cfg.tastytrade.paper is False
+
+
+def test_time_gate_config_defaults():
+    from trader.config import TimeGateConfig
+    tg = TimeGateConfig()
+    assert tg.enabled is False
+    assert tg.buy_start == "15:00"
+    assert tg.buy_end == "16:00"
+    assert tg.sell_start == "09:30"
+    assert tg.sell_end == "10:30"
+
+
+def test_load_config_parses_time_gate(tmp_path):
+    from trader.config import load_config
+    cfg_file = tmp_path / "cfg.yaml"
+    cfg_file.write_text("""
+exchange: alpaca
+mode: paper
+strategy: moderate
+capital: 1000
+pairs: [AAPL]
+time_gate:
+  enabled: true
+  buy_start: "14:30"
+  buy_end: "15:30"
+  sell_start: "09:30"
+  sell_end: "10:00"
+""")
+    cfg = load_config(str(cfg_file))
+    assert cfg.time_gate.enabled is True
+    assert cfg.time_gate.buy_start == "14:30"
+    assert cfg.time_gate.sell_end == "10:00"
+
+
+def test_load_config_time_gate_defaults_when_absent(tmp_path):
+    from trader.config import load_config
+    cfg_file = tmp_path / "cfg.yaml"
+    cfg_file.write_text("""
+exchange: alpaca
+mode: paper
+strategy: moderate
+capital: 1000
+pairs: [AAPL]
+""")
+    cfg = load_config(str(cfg_file))
+    assert cfg.time_gate.enabled is False

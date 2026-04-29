@@ -82,6 +82,15 @@ class UniverseConfig:
 
 
 @dataclass
+class TimeGateConfig:
+    enabled: bool = False
+    buy_start: str = "15:00"   # ET, inclusive
+    buy_end: str = "16:00"     # ET, inclusive
+    sell_start: str = "09:30"  # ET, inclusive
+    sell_end: str = "10:30"    # ET, inclusive
+
+
+@dataclass
 class RiskConfig:
     max_position_pct: float = 0.20
     stop_loss_pct: float = 0.05
@@ -140,6 +149,7 @@ class Config:
     ml: MLConfig = field(default_factory=MLConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     universe: UniverseConfig = field(default_factory=UniverseConfig)
+    time_gate: TimeGateConfig = field(default_factory=TimeGateConfig)
 
     def to_dict(self):
         import dataclasses
@@ -184,6 +194,7 @@ def load_config(path: str) -> Config:
         ("ml", MLConfig),
         ("telegram", TelegramConfig),
         ("universe", UniverseConfig),
+        ("time_gate", TimeGateConfig),
     ]:
         if key in data:
             setattr(cfg, key, cls(**data[key]))
