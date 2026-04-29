@@ -640,7 +640,7 @@ class TradingEngine:
         Close the weakest open position to make room for a stronger signal.
         Returns True if a position was closed (caller should retry the buy).
         """
-        rotation_min_delta = 0.10
+        rotation_min_delta = self.config.risk.rotation_min_score_delta
         if not self.portfolio.positions:
             return False
 

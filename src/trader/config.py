@@ -113,6 +113,11 @@ class RiskConfig:
     conviction_size_multiplier: float = 1.0  # e.g. 1.25 lets strong signals use 25% more capital
     # Minimum position size — skip dust orders below this USD amount
     min_position_usd: float = 50.0
+    # Signal persistence and entry threshold
+    persistence_cycles: int = 2           # consecutive cycles above threshold before buy
+    buy_score_threshold: float = 0.25     # minimum combined score to consider a buy
+    # Position rotation
+    rotation_min_score_delta: float = 0.20  # minimum score improvement to trigger rotation
 
 
 @dataclass

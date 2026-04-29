@@ -17,13 +17,15 @@ class ModerateStrategy(Strategy):
     Hard trend filter: only opens BUY positions when price is above 50-EMA.
     Requires signal persistence for entries. Supports scaling into positions."""
 
-    def __init__(self, risk, buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_THRESHOLD,
-                 tech_weight=TECH_WEIGHT, sentiment_weight=SENTIMENT_WEIGHT):
+    def __init__(self, risk, buy_threshold=None, sell_threshold=SELL_THRESHOLD,
+                 tech_weight=TECH_WEIGHT, sentiment_weight=SENTIMENT_WEIGHT,
+                 persistence_min=None):
         super().__init__(risk)
-        self.buy_threshold = buy_threshold
+        self.buy_threshold = buy_threshold if buy_threshold is not None else getattr(risk, "buy_score_threshold", BUY_THRESHOLD)
         self.sell_threshold = sell_threshold
         self.tech_weight = tech_weight
         self.sentiment_weight = sentiment_weight
+        self._persistence_min = persistence_min if persistence_min is not None else getattr(risk, "persistence_cycles", PERSISTENCE_MIN)
 
     def decide(self, symbol, technical, sentiment, capital, position):
         combined = technical.score * self.tech_weight + sentiment.score * self.sentiment_weight
@@ -43,7 +45,7 @@ class ModerateStrategy(Strategy):
 
             # New position: require signal persistence
             if position == 0.0:
-                if not self._signal_persistent(symbol, self.buy_threshold, "above", PERSISTENCE_MIN):
+                if not self._signal_persistent(symbol, self.buy_threshold, "above", self._persistence_min):
                     return {
                         "action": "hold",
                         "usd_amount": 0.0,
@@ -58,7 +60,7 @@ class ModerateStrategy(Strategy):
 
             # Scale into existing position: higher threshold, smaller size
             elif position > 0 and combined >= MIN_SIGNAL_FOR_SCALE:
-                if not self._signal_persistent(symbol, MIN_SIGNAL_FOR_SCALE, "above", PERSISTENCE_MIN):
+                if not self._signal_persistent(symbol, MIN_SIGNAL_FOR_SCALE, "above", self._persistence_min):
                     return {
                         "action": "hold",
                         "usd_amount": 0.0,
@@ -73,7 +75,7 @@ class ModerateStrategy(Strategy):
 
         # --- Sell logic: require persistence for sell signals too ---
         if combined <= self.sell_threshold and position > 0.0:
-            if not self._signal_persistent(symbol, self.sell_threshold, "below", PERSISTENCE_MIN):
+            if not self._signal_persistent(symbol, self.sell_threshold, "below", self._persistence_min):
                 return {
                     "action": "hold",
                     "usd_amount": 0.0,
