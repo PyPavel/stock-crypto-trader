@@ -85,3 +85,60 @@ def test_amc_unknown_history_gives_mild_positive():
         score = collector.score(["AAPL"])
     assert score is not None
     assert 0.10 <= score <= 0.30
+
+
+def test_edgar_tier1_keyword_gives_045():
+    collector = OvernightCatalystCollector()
+    edgar_response = {
+        "hits": {"hits": [{"_source": {"entity_name": "AAPL", "form_type": "8-K",
+                                        "file_date": "2026-04-29",
+                                        "period_of_report": "merger agreement signed"}}]}
+    }
+    with patch("trader.collectors.overnight_catalyst.requests.get") as mock_get, \
+         patch.object(collector, "_score_earnings", return_value=None):
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.json.return_value = edgar_response
+        score = collector.score(["AAPL"])
+    assert score == 0.45
+
+
+def test_edgar_tier2_keyword_gives_030():
+    collector = OvernightCatalystCollector()
+    edgar_response = {
+        "hits": {"hits": [{"_source": {"entity_name": "AAPL",
+                                        "description": "major contract awarded"}}]}
+    }
+    with patch("trader.collectors.overnight_catalyst.requests.get") as mock_get, \
+         patch.object(collector, "_score_earnings", return_value=None):
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.json.return_value = edgar_response
+        score = collector.score(["AAPL"])
+    assert score == 0.30
+
+
+def test_no_catalyst_returns_none():
+    collector = OvernightCatalystCollector()
+    with patch.object(collector, "_score_earnings", return_value=None), \
+         patch.object(collector, "_score_edgar", return_value=None):
+        score = collector.score(["AAPL"])
+    assert score is None
+
+
+def test_both_sources_averaged_and_capped():
+    collector = OvernightCatalystCollector()
+    # earnings=0.75, edgar=0.45 → avg=0.60 → within cap
+    with patch.object(collector, "_score_earnings", return_value=0.75), \
+         patch.object(collector, "_score_edgar", return_value=0.45):
+        score = collector.score(["AAPL"])
+    assert abs(score - 0.60) < 0.01
+
+
+def test_blend_cap_at_080():
+    collector = OvernightCatalystCollector()
+    # earnings=1.0, edgar=1.0 → avg=1.0 → capped at 0.80
+    with patch.object(collector, "_score_earnings", return_value=1.0), \
+         patch.object(collector, "_score_edgar", return_value=1.0):
+        score = collector.score(["AAPL"])
+    assert score == 0.80
